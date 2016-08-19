@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>1f4dfedb-50cb-4bcc-ae06-fc720d0f95eb</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>pySmartEye3.py</StartupFile>
+    <StartupFile>main.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -26,7 +26,6 @@
     <Compile Include="main.py" />
     <Compile Include="mylibrary.py" />
     <Compile Include="ObjFind.py" />
-    <Compile Include="pySmartEye3.py" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
