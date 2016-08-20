@@ -894,7 +894,7 @@ class Category:
         log(self.name + ' Bandwidth = ' + str(self.bandwidth))
 
         
-    def train3(self,algorithm):#
+    def train3(self,algorithm,retrain=1):#
         self.reduced_training_data_pos,self.reduced_training_data_neg,self.vocab=self.loadTrainData2(algorithm)
         #log(self.vocab)
         log(self.name + ': training data pos found in db: ' + str(len(self.reduced_training_data_pos)))
@@ -914,7 +914,7 @@ class Category:
             if len(self.samplesPos)==0:
                 return
             else:
-                if query_yes_no('Training Vocabulary found, Construct Again?','no'):
+                if retrain and query_yes_no('Training Vocabulary found, Construct Again?','no'):
                     self.train_samples()
 
     def train_samples(self):

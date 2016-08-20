@@ -45,14 +45,14 @@ for category in categories:
     #                    accuracy_=acc,graph=2,geo=0,testpath=category.cat_testdata_path,dbscan=0)
     #       op.run()
     m.log ('Start Training ' + category.name + ' With algorithm ' + Alg.detector_name)
-    category.train3(Alg)
+    category.train3(Alg,0)     # for not ask to retrain
     if len(category.vocab)>0:
         notes='Testing' 
         op = o.objfind(algorithm=Alg,
                        category=category,
                        min_pts_per_cluster_=3,
                        accuracy_=.8,
-                       graph=2,
+                       graph=0,
                        geo=0,
                        testpath=category.cat_testdata_path,
                        dbscan=1,
