@@ -61,7 +61,6 @@ def initialize_parameteres(data_root_='E:\\Master\\Data\\',dbname="train.db"):
     LOCALIZER_MEANSHIFT=1
     LOCALIZER_DBSCAN=2
 
-    cv2.ocl.setUseOpenCL(False)
     try:
         conn.execute('''SELECT * FROM category;''')
         print ("Database Opened successfully")
@@ -228,6 +227,25 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
         plt.show()
     plt.close()
 
+def plot_features2(img,key_pts,savefig=1,imagePath=''):
+    if len(img.shape)==3 :
+        b,g,r = cv2.split(img)       # get b,g,r    
+        plt.imshow(cv2.merge([r,g,b]))
+    else:
+        plt.imshow(img)
+
+                        
+    src_pts=[kp.pt for kp in key_pts] #get coordinates from ketpoint class 
+    x, y = zip(*src_pts)
+    if len(src_pts) > 0:
+        plt.plot(x,y, 'r' + '.')
+    plt.title('Good Features')
+    if savefig:
+        plt.savefig(imagePath)
+        plt.close()
+    else:
+        plt.show()
+
 def plot_features(img,src_pts,savefig=1,imagePath=''):
     if len(img.shape)==3 :
         b,g,r = cv2.split(img)       # get b,g,r    
@@ -372,7 +390,7 @@ def latLonToPixel(geotifAddr, latLonPairs):
 # OUTPUT: The lat/lon translation of the pixel pairings in the form [[lat1,lon1],[lat2,lon2]]
 # NOTE:   This method does not take into account pixel size and assumes a high enough 
 #	  image resolution for pixel size to be insignificant
-def pixelToLatLon(geotifAddr,pixelPairs,mask=None):
+def pixelToLatLon_(geotifAddr,pixelPairs,mask=None):
     # Load the image dataset
     ds = gdal.Open(geotifAddr)
     # Get a geo-transform of the dataset
@@ -400,6 +418,14 @@ def pixelToLatLon(geotifAddr,pixelPairs,mask=None):
                 latLonPairs.append(point)
     return latLonPairs
 
+def pixelToLatLon(geotifAddr,pixelPairs,mask=None):
+    
+    latLonPairs = []
+    for i in range(len(pixelPairs)):
+        if mask is None or mask[i]==1:
+            point = pixelPairs[i]
+            latLonPairs.append(point)
+    return latLonPairs
 
 def log(message,file_=None,print_=1):
     if print_>0:
@@ -643,11 +669,14 @@ class Algorithm:
         self.des_name = des_name
 
         self.get_id()
-        FLANN_INDEX_KDTREE = 0
-        index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-        search_params = dict(checks = 50)
-        self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
+        
+        #FLANN_INDEX_KDTREE = 0
+        #index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+        #search_params = dict(checks = 50)
+        #self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
  
+        self.matcher=cv2.BFMatcher()
+
         conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
         cur=conn.cursor()
         cur.execute("select id from algorithm where name = ?",(det_name,))
@@ -761,7 +790,7 @@ class Category:
         self.cat_traindata_path=os.path.join(Trainingdir_in, self.name)
         self.cat_testdata_path=os.path.join(Testingdir_in, self.name)
         if SVM is not None:
-            self.SVM=pickle.loads(SVM)
+            self.SVM=SVM#pickle.loads(SVM)
         else:
             self.SVM=None
         self.bandwidth=int(bandwidth)
@@ -864,9 +893,10 @@ class Category:
         self.bandwidth=int(sqrt(pow(self.max_heightM,2)+pow(self.max_widthM,2))*0.75)
         log(self.name + ' Bandwidth = ' + str(self.bandwidth))
 
+        
     def train3(self,algorithm):#
         self.reduced_training_data_pos,self.reduced_training_data_neg,self.vocab=self.loadTrainData2(algorithm)
-        
+        #log(self.vocab)
         log(self.name + ': training data pos found in db: ' + str(len(self.reduced_training_data_pos)))
         log(self.name + ': training data Neg found in db: ' + str(len(self.reduced_training_data_neg)))
         log(self.name + ': training vocabulary found in db: ' + str(len(self.vocab)))
@@ -874,112 +904,129 @@ class Category:
             log(self.name + ': SVMs found in db. ')
 
 #######################################
-        if len(self.vocab)==0 or (len(self.samplesPos)>0 and query_yes_no('Training Vocabulary found, Construct Again?','no')):
-            log('Training samples found, using samples.')
-            sp_count=len(self.samplesPos)
-            sn_count=len(self.samplesNeg)
-            i=1
-            for s in self.samplesPos:
-                log('Training sample Pos ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
-                i+=1
-                img=s.get_img()
-                s.kps=algorithm.get_kps(img)
-                img=None
-                if s.kps[0] != None and s.kps[0] != []:
-                    self.training_data_pos[0].extend(s.kps[0])
-                    self.training_data_pos[1].extend(s.kps[1])
+        if len(self.vocab)==0:
+            if len(self.samplesPos)==0:
+                assert('No Trainng Data')
+                return
+            else:
+                self.train_samples()
+        else:
+            if len(self.samplesPos)==0:
+                return
+            else:
+                if query_yes_no('Training Vocabulary found, Construct Again?','no'):
+                    self.train_samples()
+
+    def train_samples(self):
+        log('Training samples.')
+        sp_count=len(self.samplesPos)
+        sn_count=len(self.samplesNeg)
+        i=1
+        for s in self.samplesPos:
+            log('Training sample Pos ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            s.kps=algorithm.get_kps(img)
+            img=None
+            if s.kps[0] != None and s.kps[0] != []:
+                self.training_data_pos[0].extend(s.kps[0])
+                self.training_data_pos[1].extend(s.kps[1])
             
-            self.reduced_training_data_pos=self.clusterTrainData(self.training_data_pos[1],0.1)#Reduced Training data is descriptors only. no KP
-            log('Positive Features Collected : ' + str(len(self.training_data_pos[0])) 
-                + ', Reduced to ' + str(len(self.reduced_training_data_pos)))
- #################################
-            i=1
-            for s in self.samplesNeg:
-                log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
-                i+=1
-                img=s.get_img()
-                s.kps=algorithm.get_kps(img)
-                img=None
-                if len(s.kps[0]) > 0 :
-                    self.training_data_neg[0].extend(s.kps[0])
-                    self.training_data_neg[1].extend(s.kps[1])
+        self.reduced_training_data_pos=self.clusterTrainData(self.training_data_pos[1],0.1)#Reduced Training data is descriptors only. no KP
+        log('Positive Features Collected : ' + str(len(self.training_data_pos[0])) 
+            + ', Reduced to ' + str(len(self.reduced_training_data_pos)))
+#################################
+        i=1
+        for s in self.samplesNeg:
+            log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            s.kps=algorithm.get_kps(img)
+            img=None
+            if len(s.kps[0]) > 0 :
+                self.training_data_neg[0].extend(s.kps[0])
+                self.training_data_neg[1].extend(s.kps[1])
             
-            self.reduced_training_data_neg=self.clusterTrainData(self.training_data_neg[1],0.1)#Reduced Training data is descriptors only. no KP
-            log('Negative Features Collected : ' + str(len(self.training_data_neg[0])) 
-                + ', Reduced to ' + str(len(self.reduced_training_data_neg)))            
- ##################################         
-            #self.training_data_all=[[],[]]
-            #self.training_data_all[0]=self.reduced_training_data_pos[0]+self.reduced_training_data_neg[0]
-            self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg))
+        self.reduced_training_data_neg=self.clusterTrainData(self.training_data_neg[1],0.1)#Reduced Training data is descriptors only. no KP
+        log('Negative Features Collected : ' + str(len(self.training_data_neg[0])) 
+            + ', Reduced to ' + str(len(self.reduced_training_data_neg)))            
+##################################         
+        self.training_data_all=[[],[]]
+        self.training_data_all[0]=[]
+        self.training_data_all[1]=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
 #####################################            
-            #Inintiate BOW
+        
+    
+        #Build Vocanulary
 
-            #Build Vocanulary
-            log('Building Vocabulary')
-            vocab=algorithm.bowTrainer.cluster(np.array(self.training_data_all))
-            log('Saving Vocabulary')
+        log('Building Vocabulary')
+        vocab=self.clusterTrainData(self.training_data_all[1])
             
-            #Reduce Vocabulary Dimensionality with PCA
-            log('Building Vocabulary')
-            from sklearn import decomposition
-            pca = decomposition.PCA(n_components=64)    #TODO
-            pca.fit(vocab)
-            self.vocab = pca.transform(vocab)
-            #self.vocab = vocab
-            algorithm.bowextractor.setVocabulary(self.vocab)
+        #vocab=algorithm.bowTrainer.cluster(np.array(self.training_data_all[1]))
+            
+        #Reduce Vocabulary Dimensionality with PCA
+        #from sklearn import decomposition
+        #pca = decomposition.PCA(n_components=64)    #TODO
+        #pca.fit(vocab)
+        #self.vocab = pca.transform(vocab)
+        self.vocab = vocab
+        algorithm.bowextractor.setVocabulary(self.vocab)
 ###################################################               
-            self.saveTrainData(algorithm)
+        log('Saving Vocabulary')
+        self.saveTrainData(algorithm)
 ###################################################
-        #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
-            log('Building Histogram')
-            #Build Histograms
-            SVMTrainLabel=[]
-            SVMTrainData=[]
-            i=1
-            for s in self.samplesPos:
-                log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
-                i+=1
-                img=s.get_img()
-                if s.kps[0] != None and s.kps[0] != []:
-                    s.hist=algorithm.bowextractor.compute(img,s.kps[0])
-                    SVMTrainLabel.extend([1])
-                    SVMTrainData.extend(np.array(s.hist))
-                img=None
-            i=1
-            b=self.bandwidth
-            for s in self.samplesNeg:
-                log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
-                i+=1
-                img=s.get_img()
-                if len(s.kps[0]) > 0 :
-                    s.hist=algorithm.bowextractor.compute(img,s.kps[0])
-                    SVMTrainLabel.extend([0])
-                    SVMTrainData.extend(np.array(s.hist))
-                img=None
-            log('Histograms Calculated')
+    #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
+        log('Building Histogram')
+        #Build Histograms
+        SVMTrainLabel=[]
+        SVMTrainData=[]
+        i=1
+        for s in self.samplesPos:
+            log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            if s.kps[0] != None and s.kps[0] != []:
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0])
+                SVMTrainLabel.extend([1])
+                SVMTrainData.extend(s.hist)
+            img=None
+        i=1
+        b=self.bandwidth
+        for s in self.samplesNeg:
+            log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            if len(s.kps[0]) > 0 :
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0])
+                SVMTrainLabel.extend([0])
+                SVMTrainData.extend(np.array(s.hist))
+            img=None
+        log('Histograms Calculated')
 
             
-            log('Training Classifier')
-            X_train=np.array(SVMTrainData)
-            y_train=np.array(SVMTrainLabel)
+        log('Training Classifier')
+        X_train=np.array(SVMTrainData)
+        y_train=np.array(SVMTrainLabel)
 
-            self.SVM = svm.SVC(kernel='linear', probability=True)
-            self.SVM.fit(X_train,y_train)
+        self.SVM = svm.SVC(kernel='linear', probability=True)
+        self.SVM.fit(X_train,y_train)
 
             
 
-            self.saveSVM()
+        self.saveSVM()
 ###################################################    
 
     def clusterTrainData(self,data,factor=0.1):
         k=int(len(data)*factor)
-
-        est=KMeans(k,init_size=k*4)
-        log('Clustering Composite features...')
-        est.fit(data)
-        labels = est.labels_
-        reduced_data=est.cluster_centers_
-        return reduced_data
+        if k>0:
+            est=KMeans(k,init_size=k*4)
+            log('Clustering Composite features...')
+            est.fit(data)
+            labels = est.labels_
+            reduced_data=est.cluster_centers_
+            return reduced_data.astype(np.float32)
+        else:
+            return np.array([], dtype=np.float32).reshape(0,128)
 
 
     def saveTrainData(self,algorithm):
@@ -1036,10 +1083,10 @@ class Category:
             Vocab.append(desc)
 
         conn.close()
-        return [[],descsPos],[[],descsNeg],Vocab
+        return descsPos,descsNeg,np.asarray(Vocab,dtype=np.float32)
 
-    def match_features(self,des1,algorithm,Accuracy = 0.75):#BOW
-        des2=self.reduced_training_data_pos[1]
+    def match_features_with_reduced_pos(self,des1,algorithm,Accuracy = 0.75):#BOW
+        des2=self.reduced_training_data_pos
         if des2 != []:
             if des1 is None:
                 return []

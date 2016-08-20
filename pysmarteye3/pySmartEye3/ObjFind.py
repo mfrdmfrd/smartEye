@@ -102,7 +102,7 @@ class objfind():#threading.Thread):
                             #    plt.savefig(os.path.join(self.Testingdir_out,'kps_' + filename + '.png'))
                             #    plt.close()            
                    
-                            goodMatchs=self.category.match_features(test_kps[1],self.algorithm,self.accuracy)
+                            goodMatchs=self.category.match_features_with_reduced_pos(test_kps[1],self.algorithm,self.accuracy)
                             m.log('good matches = '+ str(len(goodMatchs)),self.log_file)
 
                             for g in goodMatchs:
@@ -119,24 +119,29 @@ class objfind():#threading.Thread):
                                 cluster_centers,cluster_labels=m.cluster_features_meanshift(test_kps,goodMatchs,good_kps,self.category.bandwidth)
 
                             
-                        cv2.ocl.setUseOpenCL(False)
                         cc_f=[]
                         cc_p=[]
                         hist_all=[]
-                        self.algorithm.bowextractor.setVocabulary(np.array(self.category.vocab))
+                        self.algorithm.bowextractor.setVocabulary(self.category.vocab)
 
                         for c in cluster_centers:
                             #print(c[1]-band/2,c[1]+band/2,c[0]-band/2,c[0]+band/2)
                             patch=img[c[1]-band/2:c[1]+band/2,c[0]-band/2:c[0]+band/2]     #TODO may need enlargement
 
-                            patch_kps=self.algorithm.detector.detect(patch)
-                            hist=self.algorithm.bowextractor.compute(patch,patch_kps)
-                            hist_all.append(hist) 
+                            #patch_kps=self.algorithm.detector.detect(patch)
+                            patch_kps,patch_descs=self.algorithm.descriptor.detectAndCompute(patch,None)
+
+                            #m.plot_features2(patch,patch_kps,0)
+
+                            hist=self.algorithm.bowextractor.compute(patch,patch_kps,patch_descs)
                             if hist is not None:
                                 cc_f.extend(self.category.SVM.predict(hist))
                                 cc_p.extend(self.category.SVM.predict_proba(hist))
                             else:
                                 cc_f.extend([0])
+                                hist=np.zeros(len(self.category.vocab), dtype=np.float32)
+                            
+                            hist_all.extend(hist) 
                             
                                 
                             if self.graph>2 and patch_kps!=[]:
@@ -149,7 +154,9 @@ class objfind():#threading.Thread):
                                     plt.imshow(p_t)
                                 #plt.savefig(os.path.join(self.Testingdir_out,'kps_' + filename + '.png'))
                                 plt.show()         
-                        df=self.category.SVM.decision_function(hist_all)
+                        
+                        hist_all=np.asarray(hist_all)
+                        #df=self.category.SVM.decision_function(hist_all)
 
                              
                         detected_targets_for_file = m.pixelToLatLon(testFile_path,cluster_centers,cc_f)        

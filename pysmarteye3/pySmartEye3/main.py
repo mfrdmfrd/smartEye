@@ -21,7 +21,7 @@ import ObjFind as o
 
 ###Initialize
 m.initialize_parameteres(data_root_='E:\\Master\\Data\\',dbname="train.db")
-Alg=m.Algorithm('SIFT',bow=True,k=1000)
+Alg=m.Algorithm('SIFT',bow=True,k=100)
 
 
 #ops = []
@@ -46,22 +46,22 @@ for category in categories:
     #       op.run()
     m.log ('Start Training ' + category.name + ' With algorithm ' + Alg.detector_name)
     category.train3(Alg)
-    
-    notes='Testing' 
-    op = o.objfind(algorithm=Alg,
-                   category=category,
-                   min_pts_per_cluster_=3,
-                   accuracy_=.8,
-                   graph=2,
-                   geo=0,
-                   testpath=category.cat_testdata_path,
-                   dbscan=1,
-                   notes=notes,
-                   epsilon_=.15,
-                   localizer=m.LOCALIZER_WINDOW,
-                   window_size_factor=1,
-                   window_overlapping_factor=.2)
-    op.run_bow()
+    if len(category.vocab)>0:
+        notes='Testing' 
+        op = o.objfind(algorithm=Alg,
+                       category=category,
+                       min_pts_per_cluster_=3,
+                       accuracy_=.8,
+                       graph=2,
+                       geo=0,
+                       testpath=category.cat_testdata_path,
+                       dbscan=1,
+                       notes=notes,
+                       epsilon_=.15,
+                       localizer=m.LOCALIZER_WINDOW,
+                       window_size_factor=1,
+                       window_overlapping_factor=.2)
+        op.run_bow()
 
 
 
