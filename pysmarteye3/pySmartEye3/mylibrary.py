@@ -35,7 +35,7 @@ def convert_array(text):
     return np.load(out)
 
 def initialize_parameteres(data_root_='E:\\Master\\Data\\',dbname="train.db"):
-    global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath, LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN
+    global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath, LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer
     # Display progress logs on stdout
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
@@ -227,7 +227,7 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
         plt.show()
     plt.close()
 
-def plot_features2(img,key_pts,savefig=1,imagePath=''):
+def plot_features2(img,key_pts,savefig=1,imagePath='',title='Plot Features 2'):
     if len(img.shape)==3 :
         b,g,r = cv2.split(img)       # get b,g,r    
         plt.imshow(cv2.merge([r,g,b]))
@@ -239,7 +239,8 @@ def plot_features2(img,key_pts,savefig=1,imagePath=''):
     x, y = zip(*src_pts)
     if len(src_pts) > 0:
         plt.plot(x,y, 'r' + '.')
-    plt.title('Good Features')
+    plt.title(title)
+    plt.axis('off')
     if savefig:
         plt.savefig(imagePath)
         plt.close()
@@ -712,8 +713,7 @@ class Algorithm:
             if case(None): # default, could also just omit condition or 'if True'
                 self.descriptor=self.detector
                 self.des_name=self.detector_name
-                
-        self.bowTrainer=cv2.BOWKMeansTrainer(k)
+        self.k=k
         self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
 
 
@@ -780,7 +780,7 @@ class Category:
     #    self.results=[]                 #All detected objects for that category in all tiles
     #    self.bandwidth=0
 
-    def __init__(self,id,name,bandwidth=0,SVM=None):
+    def __init__(self,id,name,bandwidth=0,SVM=None,train=1):
         self.id=id
         self.name=name
         self.samplesPos=[]
@@ -795,7 +795,7 @@ class Category:
             self.SVM=None
         self.bandwidth=int(bandwidth)
 
-        if os.path.exists(self.cat_traindata_path):
+        if train and os.path.exists(self.cat_traindata_path):
             self.load_samples()
         #self.training_data= [[],[]]     #All kps of the all samples in the category
         
@@ -909,15 +909,15 @@ class Category:
                 assert('No Trainng Data')
                 return
             else:
-                self.train_samples()
+                self.train_samples(algorithm)
         else:
             if len(self.samplesPos)==0:
                 return
             else:
                 if retrain and query_yes_no('Training Vocabulary found, Construct Again?','no'):
-                    self.train_samples()
+                    self.train_samples(algorithm)
 
-    def train_samples(self):
+    def train_samples(self,algorithm):
         log('Training samples.')
         sp_count=len(self.samplesPos)
         sn_count=len(self.samplesNeg)
@@ -951,18 +951,19 @@ class Category:
         log('Negative Features Collected : ' + str(len(self.training_data_neg[0])) 
             + ', Reduced to ' + str(len(self.reduced_training_data_neg)))            
 ##################################         
-        self.training_data_all=[[],[]]
-        self.training_data_all[0]=[]
-        self.training_data_all[1]=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
+        self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
 #####################################            
         
     
         #Build Vocanulary
 
         log('Building Vocabulary')
-        vocab=self.clusterTrainData(self.training_data_all[1])
-            
-        #vocab=algorithm.bowTrainer.cluster(np.array(self.training_data_all[1]))
+        if algorithm.k<1:
+            bowTrainer=cv2.BOWKMeansTrainer(algorithm.k*len(self.training_data_all))
+        else:
+            bowTrainer=cv2.BOWKMeansTrainer(algorithm.k)
+		#vocab=self.clusterTrainData(self.training_data_all[1])
+        vocab=bowTrainer.cluster(np.array(self.training_data_all))
             
         #Reduce Vocabulary Dimensionality with PCA
         #from sklearn import decomposition
@@ -1066,17 +1067,18 @@ class Category:
         descsNeg=[]
         Vocab=[]
         
-        #Load Positive descriptors
-        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=1" ,(self.id , algorithm.id))
-        for r in cur:
-            descsPos.append(r[0])
+        if localizer!=LOCALIZER_WINDOW:
+			#Load Positive descriptors
+            cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=1" ,(self.id , algorithm.id))
+            for r in cur:
+                descsPos.append(r[0])
         
         #Load Negative descriptors
-        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=0" ,(self.id , algorithm.id))
-        for r in cur:
-            descsNeg.append(r[0])
+        #cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=0" ,(self.id , algorithm.id))
+        #for r in cur:
+        #    descsNeg.append(r[0])
           
-        #Load BOW Vocabulary
+        ##Load BOW Vocabulary
         cur.execute("SELECT descriptor from vocabData t join category c on t.category=c.id where c.id = ? and algorithm=?" ,(self.id , algorithm.id))
         for r in cur:
             desc=np.array(r[0])
@@ -1226,13 +1228,13 @@ def loadCategories(conn):
     return cats
 
 
-def loadCategories():
+def loadCategories(train=1):
     conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
 
     cats=[]
     cur = conn.cursor()
     cur.execute("select id,name,bandwidth,SVM from category ")
     for r in cur:
-        c=Category(r[0],r[1],r[2],r[3])
+        c=Category(r[0],r[1],r[2],r[3],train=train)
         cats.append(c)
     return cats

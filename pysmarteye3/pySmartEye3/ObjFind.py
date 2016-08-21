@@ -117,7 +117,9 @@ class objfind():#threading.Thread):
                             elif self.localizer==m.LOACLIZER_MEANSHIFT:
                                 m.log("Using Mean Shift to Localize Targets...")
                                 cluster_centers,cluster_labels=m.cluster_features_meanshift(test_kps,goodMatchs,good_kps,self.category.bandwidth)
-
+                            #Create images of results and save it(self.graph -> 0: No Graphs, 1: create and save but no show, 2: create and save and show)
+                            if self.graph:
+                                m.plot_features(img,good_kps,1,os.path.join(self.Testingdir_out, 'good_kps_'+ testfile))
                             
                         cc_f=[]
                         cc_p=[]
@@ -130,7 +132,6 @@ class objfind():#threading.Thread):
 
                             #patch_kps=self.algorithm.detector.detect(patch)
                             patch_kps,patch_descs=self.algorithm.descriptor.detectAndCompute(patch,None)
-
                             #m.plot_features2(patch,patch_kps,0)
 
                             hist=self.algorithm.bowextractor.compute(patch,patch_kps,patch_descs)
@@ -153,12 +154,11 @@ class objfind():#threading.Thread):
                                 else:
                                     plt.imshow(p_t)
                                 #plt.savefig(os.path.join(self.Testingdir_out,'kps_' + filename + '.png'))
-                                plt.show()         
-                        
-                        hist_all=np.asarray(hist_all)
+                                plt.show()                                                             
+                            patch=None                  
+                        #hist_all=np.asarray(hist_all)
                         #df=self.category.SVM.decision_function(hist_all)
 
-                             
                         detected_targets_for_file = m.pixelToLatLon(testFile_path,cluster_centers,cc_f)        
                         #Filter by score of the cluster         
                         #for k in range(len(cc_f)):
@@ -177,11 +177,11 @@ class objfind():#threading.Thread):
                     
                         #Create images of results and save it(self.graph -> 0: No Graphs, 1: create and save but no show, 2: create and save and show)
                         if self.graph:
-                            m.plot_features(img,good_kps,1,os.path.join(self.Testingdir_out, 'good_kps_'+ testfile))
                             m.plot_features_and_cluster_centers(img,cluster_centers,None,cluster_labels,good_kps, self.graph,
                                                                 os.path.join(self.Testingdir_out,'objects_'+ testfile))
                             m.plot_features_and_cluster_centers(img,cluster_centers,cc_f,cluster_labels,good_kps, self.graph,
                                                                 os.path.join(self.Testingdir_out,'filtered_objects_'+ testfile))
+                        img=None
                         ##Save detected targets as shape file
                         ##Disabled during test HAN Dataset
                         if self.geo:

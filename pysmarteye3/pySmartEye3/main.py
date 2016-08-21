@@ -7,23 +7,12 @@ import mylibrary as m
 import ObjFind as o
 
 
-#results = []
-#accuracys=np.arange(0.71,0.74,0.01)
-#epsilon=np.arange(0.05,0.05,0.05)
-#min_pts=np.arange(1,10)
-
-#for pts in range(10):
-#    p.initialize_parameteres(min_pts_per_cluster_=pts)
-#    prec,recall=o.objfind()
-#    results.append([prec,recall])
-
-
-
 ###Initialize
 m.initialize_parameteres(data_root_='E:\\Master\\Data\\',dbname="train.db")
-Alg=m.Algorithm('SIFT',bow=True,k=100)
+Alg=m.Algorithm('SIFT',bow=True,k=0.05)
 
-
+m.localizer=m.LOCALIZER_WINDOW
+retrain=1
 #ops = []
 #n=1
 #    op = o.objfind(accuracy_=a,i=n)
@@ -45,14 +34,14 @@ for category in categories:
     #                    accuracy_=acc,graph=2,geo=0,testpath=category.cat_testdata_path,dbscan=0)
     #       op.run()
     m.log ('Start Training ' + category.name + ' With algorithm ' + Alg.detector_name)
-    category.train3(Alg,0)     # for not ask to retrain
+    category.train3(Alg,retrain=retrain)     # for not ask to retrain
     if len(category.vocab)>0:
-        notes='Testing' 
+        notes='Testing with vocab=100, no pca, window scanning, window_size_factor=1,window_overlapping_factor=.2' 
         op = o.objfind(algorithm=Alg,
                        category=category,
                        min_pts_per_cluster_=3,
                        accuracy_=.8,
-                       graph=0,
+                       graph=1,
                        geo=0,
                        testpath=category.cat_testdata_path,
                        dbscan=1,
