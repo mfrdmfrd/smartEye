@@ -14,6 +14,8 @@ from sklearn import svm
 from sklearn.cluster import MiniBatchKMeans as KMeans
 import logging
 import sys
+from sklearn.decomposition import RandomizedPCA
+
 
 #import matplotlib.cm as cm
 #import pickle
@@ -215,12 +217,13 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
             plt.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor='none',
                         markeredgecolor=col, markersize=20)
             if labels!=[]:
-                plt.plot(src_pts[my_members, 0], src_pts[my_members, 1], col + '.')
+                plt.plot(src_pts[my_members, 0], src_pts[my_members, 1], 'r' + '.')
             count+=1
+    plt.axis('off')
 
     plt.title('Number of clusters: %d' % count)
     if savefig:
-        plt.savefig(img_name)
+        plt.savefig(img_name,bbox_inches='tight')
         #log('clustering result image saved')
 
     if savefig > 1:
@@ -228,24 +231,47 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
     plt.close()
 
 def plot_features2(img,key_pts,savefig=1,imagePath='',title='Plot Features 2'):
+    
     if len(img.shape)==3 :
         b,g,r = cv2.split(img)       # get b,g,r    
-        plt.imshow(cv2.merge([r,g,b]))
+        img2=cv2.merge([r,g,b])
     else:
-        plt.imshow(img)
-
-                        
+        img2=img
+            
     src_pts=[kp.pt for kp in key_pts] #get coordinates from ketpoint class 
-    x, y = zip(*src_pts)
+    if src_pts!=[]:
+        x, y = zip(*src_pts)
+    else:
+        x,y=[],[]
+    
+    plt.imshow(img2)
+    #plt.title(title)
+    plt.axis('off')
     if len(src_pts) > 0:
         plt.plot(x,y, 'r' + '.')
-    plt.title(title)
-    plt.axis('off')
     if savefig:
-        plt.savefig(imagePath)
-        plt.close()
-    else:
+        plt.savefig(imagePath,bbox_inches='tight')
+    if savefig>1:
         plt.show()
+    plt.close()
+
+
+    #sizes = np.shape(img2)
+    #height = float(sizes[0])
+    #width = float(sizes[1])
+     
+    #fig = plt.figure()
+    #fig.set_size_inches(width/height, 1, forward=False)
+    #ax = plt.Axes(fig, [0., 0., 1., 1.])
+    #ax.set_axis_off()
+    #fig.add_axes(ax)
+ 
+    #ax.imshow(img2)
+    
+    #plt.savefig(imagePath)
+    #plt.show() 
+    #plt.close()
+
 
 def plot_features(img,src_pts,savefig=1,imagePath=''):
     if len(img.shape)==3 :
@@ -296,6 +322,16 @@ def find_nearest_position2(value,array):
     idx = dist_a.argmin()
     distance=calc_distance2(value[0],value[1],array[idx][0],array[idx][1])
     return idx,distance
+
+def find_nearest_position3(value,array,matched):
+    dist_a = np.array([np.linalg.norm([x,y]) for (x,y) in array-value])
+    idx = dist_a.argmin()
+    
+    while matched[idx]==1 and dist_a[idx]<1000000:
+        dist_a[idx]=1000000
+        idx = dist_a.argmin()
+
+    return idx,dist_a[idx]
 #def pickle_keypoints(descriptors):
  
 #    temp_array = []
@@ -589,7 +625,7 @@ class Sample:
         self.aoi=aoi       
         #self.gimg=gdal.Open(self.file_path)       
 
-        self.__calc_dimensions()
+        #self.__calc_dimensions()
         self.kps= []
  
     def get_img(self):
@@ -605,7 +641,7 @@ class Sample:
     def get_path(self):
         return os.path.join(cat_in_path, file)
 
-    def __calc_dimensions(self):
+    def calc_dimensions(self):
         """Calculate the real width and height of the sample"""
         gimg=self.get_img()
  		#gimg=gdal.Open(self.file_path) 
@@ -665,18 +701,18 @@ class switch(object):
             return False
 
 class Algorithm:
-    def __init__(self, det_name,des_name=None,bow=False,k=1000,matcher="FLANN"):
+    def __init__(self, det_name,des_name=None,bow=False,k=1000,matcher="FLANN",pca_n=0):
         self.detector_name = det_name
         self.des_name = des_name
 
         self.get_id()
         
-        #FLANN_INDEX_KDTREE = 0
-        #index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-        #search_params = dict(checks = 50)
-        #self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
+        FLANN_INDEX_KDTREE = 0
+        index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+        search_params = dict(checks = 50)
+        self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
  
-        self.matcher=cv2.BFMatcher()
+        #self.matcher=cv2.BFMatcher()
 
         conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
         cur=conn.cursor()
@@ -715,8 +751,23 @@ class Algorithm:
                 self.des_name=self.detector_name
         self.k=k
         self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
+        self.pca_n=pca_n
 
-
+    def search(self,category):
+        import ObjFind as o
+        notes='Testing with vocab=' + str(self.k) + ', no pca, window scanning, window_size_factor=1,window_overlapping_factor=.2' 
+        op = o.objfind(algorithm=self,
+                       category=category,
+                       accuracy_=.8,
+                       graph=1,
+                       geo=0,
+                       testpath=category.cat_testdata_path,
+                       notes=notes,
+                       epsilon_=.15,
+                       localizer=m.LOCALIZER_WINDOW,
+                       window_size_factor=1,
+                       window_overlapping_factor=.2)
+        op.run_bow()
 
 
     #def get_algorithm(self):
@@ -780,25 +831,31 @@ class Category:
     #    self.results=[]                 #All detected objects for that category in all tiles
     #    self.bandwidth=0
 
-    def __init__(self,id,name,bandwidth=0,SVM=None,train=1):
+    def __init__(self,id,name,bandwidth=0,SVM=None,PCA=None,train=1):
         self.id=id
         self.name=name
         self.samplesPos=[]
         self.samplesNeg=[]   
-        self.training_data_pos=([],[])
-        self.training_data_neg=([],[])     
+        self.training_data_pos=[]
+        self.training_data_neg=[]     
         self.cat_traindata_path=os.path.join(Trainingdir_in, self.name)
         self.cat_testdata_path=os.path.join(Testingdir_in, self.name)
-        if SVM is not None:
-            self.SVM=SVM#pickle.loads(SVM)
-        else:
-            self.SVM=None
+        
+        
+        self.PCA=SVM
+        self.SVM=SVM
+
+        #if SVM is not None:
+        #    self.SVM=SVM#pickle.loads(SVM)
+        #else:
+        #    self.SVM=None
         self.bandwidth=int(bandwidth)
 
         if train and os.path.exists(self.cat_traindata_path):
             self.load_samples()
         #self.training_data= [[],[]]     #All kps of the all samples in the category
         
+
 
     def load_samples(self):
         log('Reading Training data for ' + self.name +' ...')
@@ -810,18 +867,18 @@ class Category:
 
         if os.path.exists(self.training_pos_input_path):
             for file in os.listdir(self.training_pos_input_path):
-                log('Reading Positive Sample: ' + file)
+                #log('Reading Positive Sample: ' + file)
                 filename,extension = file.rsplit('.',1)
-                if (extension=="tif" or extension=="jpg" or extension=="bmp" or extension=="png"): 
+                if (extension=="tif" or extension=="jpg" or extension=="png"): 
                     s = Sample(file,self.training_pos_input_path)
                     self.samplesPos.append(s)
 
 
         if os.path.exists(self.training_pos_c_input_path):
             for file in os.listdir(self.training_pos_c_input_path):
-                log('Reading Positive Combosite Sample: ' + file)
+                #log('Reading Positive Combosite Sample: ' + file)
                 filename,extension = file.rsplit('.',1)
-                if (extension=="tif" or extension=="jpg" or extension=="bmp" or extension=="png"): 
+                if (extension=="tif" or extension=="jpg" or extension=="png"): 
                     gt_filename=os.path.join(self.training_gt_input_path,filename + '.txt')
                     f = open(gt_filename, "r")
                     for line in f.readlines():
@@ -833,23 +890,24 @@ class Category:
                     
                             s = Sample(file,self.training_pos_c_input_path,l)
                         self.samplesPos.append(s)   
-        
+        log('Read Positive Samples: ' + str(len(self.samplesPos)) + ' file(s)')
+
         if self.bandwidth==0 or self.bandwidth == None:
             self.__calculate_bandwidth()
         
         if os.path.exists(self.training_neg_input_path):
             for file in os.listdir(self.training_neg_input_path):
-                log('Reading Negative Sample: ' + file)
+                #log('Reading Negative Sample: ' + file)
                 filename,extension = file.rsplit('.',1)
-                if (extension=="tif" or extension=="jpg" or extension=="bmp" or extension=="png"): 
+                if (extension=="tif" or extension=="jpg" or extension=="png"): 
                     s = Sample(file,self.training_neg_input_path)
                     self.samplesNeg.append(s)
 
         if os.path.exists(self.training_neg_c_input_path):
             for file in os.listdir(self.training_neg_c_input_path):
-                log('Reading Negative Combosite Sample: ' + file)
+                #log('Reading Negative Combosite Sample: ' + file)
                 filename,extension = file.rsplit('.',1)
-                if (extension=="tif" or extension=="jpg" or extension=="bmp" or extension=="png"): 
+                if (extension=="tif" or extension=="jpg" or extension=="png"): 
                     #gt_filename=os.path.join(self.training_gt_input_path,filename + '.txt')
                     #f = open(gt_filename, "r")
                     #for line in f.readlines():
@@ -866,6 +924,7 @@ class Category:
                         l=[c[0]-b/2,c[1]-b/2,c[0]+b/2,c[1]+b/2]#get left up corener and bottom righ corner coords
                         s = Sample(file,self.training_neg_c_input_path,l)
                         self.samplesNeg.append(s)   
+        log('Read Negative Samples: ' + str(len(self.samplesNeg)) + ' file(s)')
 
 
     def __calculate_bandwidth(self):
@@ -879,8 +938,12 @@ class Category:
             #widths.append(s.width)
             #heights.append(s.height)
                 
-            wM,hM=s.get_geo_dims()
-            
+            try:
+                wM,hM=s.get_geo_dims()
+            except:
+                s.calc_dimensions()
+                wM,hM=s.get_geo_dims()
+
             widthsM.append(wM)
             heightsM.append(hM)
         if len(self.samplesPos) > 0:
@@ -895,10 +958,10 @@ class Category:
 
         
     def train3(self,algorithm,retrain=1):#
-        self.reduced_training_data_pos,self.reduced_training_data_neg,self.vocab=self.loadTrainData2(algorithm)
+        self.training_data_pos,self.training_data_neg,self.vocab=self.loadTrainData2(algorithm)
         #log(self.vocab)
-        log(self.name + ': training data pos found in db: ' + str(len(self.reduced_training_data_pos)))
-        log(self.name + ': training data Neg found in db: ' + str(len(self.reduced_training_data_neg)))
+        log(self.name + ': training data pos found in db: ' + str(len(self.training_data_pos)))
+        log(self.name + ': training data Neg found in db: ' + str(len(self.training_data_neg)))
         log(self.name + ': training vocabulary found in db: ' + str(len(self.vocab)))
         if self.SVM is not None:
             log(self.name + ': SVMs found in db. ')
@@ -909,87 +972,173 @@ class Category:
                 assert('No Trainng Data')
                 return
             else:
-                self.train_samples(algorithm)
+                self.calculate_train_data(algorithm)
+                self.build_vocab(algorithm)
+                self.build_training_hitsograms(algorithm)
+                self.train_classifier()
         else:
-            if len(self.samplesPos)==0:
-                return
-            else:
-                if retrain and query_yes_no('Training Vocabulary found, Construct Again?','no'):
-                    self.train_samples(algorithm)
+            if len(self.samplesPos)>0:
+                if retrain:# and query_yes_no('Training Vocabulary found, Construct Again?','no'):
+                    self.calculate_train_data(algorithm)
+                    self.build_vocab(algorithm)
+                    self.build_training_hitsograms(algorithm)
+                    if algorithm.pca_n>0 :
+                        self.build_pca(algorithm.pca_n)
+                    self.train_classifier()
 
-    def train_samples(self,algorithm):
+    def calculate_train_data(self,algorithm):
         log('Training samples.')
         sp_count=len(self.samplesPos)
         sn_count=len(self.samplesNeg)
+        self.training_data_pos=[]
+        self.training_data_neg=[]
         i=1
         for s in self.samplesPos:
-            log('Training sample Pos ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+            #log('Training sample Pos ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
             i+=1
             img=s.get_img()
             s.kps=algorithm.get_kps(img)
+            #plot_features2(img,s.kps[0],savefig=1,imagePath='e:\\master\\data\\temp\\p_'+ str(i) + s.file_name ,title='Pos Sample KPS')
             img=None
             if s.kps[0] != None and s.kps[0] != []:
-                self.training_data_pos[0].extend(s.kps[0])
-                self.training_data_pos[1].extend(s.kps[1])
-            
-        self.reduced_training_data_pos=self.clusterTrainData(self.training_data_pos[1],0.1)#Reduced Training data is descriptors only. no KP
-        log('Positive Features Collected : ' + str(len(self.training_data_pos[0])) 
-            + ', Reduced to ' + str(len(self.reduced_training_data_pos)))
+                self.training_data_pos.extend(s.kps[1])
+        log('Positive Features Collected : ' + str(len(self.training_data_pos)))    
+        
 #################################
         i=1
         for s in self.samplesNeg:
-            log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+            #log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
             i+=1
             img=s.get_img()
             s.kps=algorithm.get_kps(img)
+            #plot_features2(img,s.kps[0],savefig=1,imagePath='e:\\master\\data\\temp\\n_'+ str(i) + s.file_name ,title='Neg Sample KPS')
             img=None
             if len(s.kps[0]) > 0 :
-                self.training_data_neg[0].extend(s.kps[0])
-                self.training_data_neg[1].extend(s.kps[1])
-            
-        self.reduced_training_data_neg=self.clusterTrainData(self.training_data_neg[1],0.1)#Reduced Training data is descriptors only. no KP
-        log('Negative Features Collected : ' + str(len(self.training_data_neg[0])) 
-            + ', Reduced to ' + str(len(self.reduced_training_data_neg)))            
-##################################         
-        self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
-#####################################            
+                self.training_data_neg.extend(s.kps[1])
         
-    
+        log('Negative Features Collected : ' + str(len(self.training_data_neg)))   
+              
+##################################         
+        self.training_data_all=np.concatenate((self.training_data_pos,self.training_data_neg), axis=0)
+        #self.training_data_all=self.reduced_training_data_pos.copy()
+        #self.training_data_all.extend(self.reduced_training_data_neg)
+        #self.training_data_all=self.reduced_training_data_pos+self.reduced_training_data_neg
+#####################################            
+
+    def reduce_training_data(self,k):
+        self.training_data_pos=self.clusterTrainData(self.training_data_pos,k)#Reduced Training data is descriptors only. no KP
+        log('Positive Features Reduced to ' + str(len(self.reduced_training_data_pos)))
+        self.training_data_neg=self.clusterTrainData(self.training_data_neg,k)#Reduced Training data is descriptors only. no KP
+        log('Negative Features Reduced to ' + str(len(self.reduced_training_data_neg))) 
+
+        self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
+
+    def saveTrainDataFull(self,algorithm):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        try:
+            conn.execute("delete from TrainingData where category=? and algorithm=?",(self.id,algorithm.id))
+        
+            for des in self.training_data_pos:
+                conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,1)",
+                             (des, self.id, algorithm.id))
+            for des in self.training_data_neg:
+                conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,0)",
+                             (des, self.id, algorithm.id))
+            conn.commit()
+        except:
+            conn.rollback()
+        finally:
+            conn.close()               
+
+#    def calculate_train_data(self,algorithm):
+#        log('Training samples.')
+#        sp_count=len(self.samplesPos)
+#        sn_count=len(self.samplesNeg)
+#        i=1
+#        for s in self.samplesPos:
+#            #log('Training sample Pos ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+#            i+=1
+#            img=s.get_img()
+#            s.kps=algorithm.get_kps(img)
+#            #plot_features2(img,s.kps[0],savefig=1,imagePath='e:\\master\\data\\temp\\p_'+ str(i) + s.file_name ,title='Pos Sample KPS')
+#            img=None
+#            if s.kps[0] != None and s.kps[0] != []:
+#                self.training_data_pos[0].extend(s.kps[0])
+#                self.training_data_pos[1].extend(s.kps[1])
+            
+#        self.reduced_training_data_pos=self.clusterTrainData(self.training_data_pos[1],0.1)#Reduced Training data is descriptors only. no KP
+#        log('Positive Features Collected : ' + str(len(self.training_data_pos[0])) 
+#            + ', Reduced to ' + str(len(self.reduced_training_data_pos)))
+##################################
+#        i=1
+#        for s in self.samplesNeg:
+#            #log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+#            i+=1
+#            img=s.get_img()
+#            s.kps=algorithm.get_kps(img)
+#            #plot_features2(img,s.kps[0],savefig=1,imagePath='e:\\master\\data\\temp\\n_'+ str(i) + s.file_name ,title='Neg Sample KPS')
+#            img=None
+#            if len(s.kps[0]) > 0 :
+#                self.training_data_neg[0].extend(s.kps[0])
+#                self.training_data_neg[1].extend(s.kps[1])
+            
+#        self.reduced_training_data_neg=self.clusterTrainData(self.training_data_neg[1],0.1)#Reduced Training data is descriptors only. no KP
+#        log('Negative Features Collected : ' + str(len(self.training_data_neg[0])) 
+#            + ', Reduced to ' + str(len(self.reduced_training_data_neg)))            
+###################################         
+#        self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
+#        self.training_data_all_label=[]
+#        self.training_data_all_label.extend(np.ones(len(self.reduced_training_data_pos)))
+#        self.training_data_all_label.extend(np.zeros(len(self.reduced_training_data_neg)))
+#        #self.training_data_all=self.reduced_training_data_pos.copy()
+#        #self.training_data_all.extend(self.reduced_training_data_neg)
+#        #self.training_data_all=self.reduced_training_data_pos+self.reduced_training_data_neg
+######################################            
+        
+    def build_vocab(self,algorithm):
         #Build Vocanulary
 
         log('Building Vocabulary')
+        
+        
         if algorithm.k<1:
-            bowTrainer=cv2.BOWKMeansTrainer(algorithm.k*len(self.training_data_all))
+            K=int(algorithm.k*len(self.training_data_all))
         else:
-            bowTrainer=cv2.BOWKMeansTrainer(algorithm.k)
-		#vocab=self.clusterTrainData(self.training_data_all[1])
-        vocab=bowTrainer.cluster(np.array(self.training_data_all))
+            K=algorithm.k
             
-        #Reduce Vocabulary Dimensionality with PCA
-        #from sklearn import decomposition
-        #pca = decomposition.PCA(n_components=64)    #TODO
-        #pca.fit(vocab)
-        #self.vocab = pca.transform(vocab)
-        self.vocab = vocab
+        bowTrainer=cv2.BOWKMeansTrainer(K)
+        #######vocab=self.clusterTrainData(self.training_data_all,K)
+        #vocab=bowTrainer.cluster(np.array(self.training_data_all))
+        ########self.vocab = vocab
         algorithm.bowextractor.setVocabulary(self.vocab)
 ###################################################               
         log('Saving Vocabulary')
         self.saveTrainData(algorithm)
 ###################################################
-    #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
+
+    def build_training_hitsograms(self,algorithm):
+        #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
         log('Building Histogram')
         #Build Histograms
-        SVMTrainLabel=[]
-        SVMTrainData=[]
+        self.SVMTrainLabel=[]
+        self.SVMTrainData=[]
+        sp_count=len(self.samplesPos)
+        sn_count=len(self.samplesNeg)
+
+
         i=1
         for s in self.samplesPos:
             log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
             i+=1
             img=s.get_img()
+            if s.kps==[]:
+                s.kps=algorithm.get_kps(img)
             if s.kps[0] != None and s.kps[0] != []:
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0])
-                SVMTrainLabel.extend([1])
-                SVMTrainData.extend(s.hist)
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                self.SVMTrainLabel.extend([1])
+                self.SVMTrainData.extend(s.hist)
             img=None
         i=1
         b=self.bandwidth
@@ -997,20 +1146,28 @@ class Category:
             log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
             i+=1
             img=s.get_img()
-            if len(s.kps[0]) > 0 :
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0])
-                SVMTrainLabel.extend([0])
-                SVMTrainData.extend(np.array(s.hist))
+            if s.kps==[]:
+                s.kps=algorithm.get_kps(img)
+            if s.kps[0] != None and s.kps[0] != []:
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                self.SVMTrainLabel.extend([0])
+                self.SVMTrainData.extend(np.array(s.hist))
             img=None
+        self.X_train=np.array(self.SVMTrainData)
+        self.y_train=np.array(self.SVMTrainLabel)
         log('Histograms Calculated')
 
-            
-        log('Training Classifier')
-        X_train=np.array(SVMTrainData)
-        y_train=np.array(SVMTrainLabel)
+    def build_pca(self,n):
+        self.PCA=RandomizedPCA(n, whiten=True).fit(self.X_train)
+        self.X_train = self.PCA.transform(self.X_train)
+        self.savePCA()
 
-        self.SVM = svm.SVC(kernel='linear', probability=True)
-        self.SVM.fit(X_train,y_train)
+    def train_classifier(self):        
+        log('Training Classifier')
+
+
+        self.SVM = svm.SVC(probability=True)
+        self.SVM.fit(self.X_train,self.y_train)
 
             
 
@@ -1018,8 +1175,11 @@ class Category:
 ###################################################    
 
     def clusterTrainData(self,data,factor=0.1):
-        k=int(len(data)*factor)
-        if k>0:
+        if factor<1:
+            k=int(len(data)*factor)
+        else:
+            k=factor
+        if k>0 and len(data)>0:
             est=KMeans(k,init_size=k*4)
             log('Clustering Composite features...')
             est.fit(data)
@@ -1037,10 +1197,10 @@ class Category:
         conn.execute("delete from vocabData where category=? and algorithm=?",(self.id,algorithm.id))
         conn.execute("delete from TrainingData where category=? and algorithm=?",(self.id,algorithm.id))
         
-        for des in self.reduced_training_data_pos:
+        for des in self.training_data_pos:
             conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,1)",
                          (des, self.id, algorithm.id))
-        for des in self.reduced_training_data_neg:
+        for des in self.training_data_neg:
             conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,0)",
                          (des, self.id, algorithm.id))
 
@@ -1057,9 +1217,18 @@ class Category:
         s = pickle.dumps(self.SVM)
         conn.execute("update category set svm=?, bandwidth=? where id=?", (s,self.bandwidth,self.id))
         conn.commit()
-        conn.close()        
-        
-    def loadTrainData2(self,algorithm):
+        conn.close()     
+           
+    def savePCA(self):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        s = pickle.dumps(self.PCA)
+        conn.execute("update category set pca=? where id=?", (s,self.id))
+        conn.commit()
+        conn.close() 
+                   
+    def loadTrainData2(self,algorithm,):
         conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
 
         cur = conn.cursor()
@@ -1067,16 +1236,16 @@ class Category:
         descsNeg=[]
         Vocab=[]
         
-        if localizer!=LOCALIZER_WINDOW:
-			#Load Positive descriptors
-            cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=1" ,(self.id , algorithm.id))
-            for r in cur:
-                descsPos.append(r[0])
+       # if localizer!=LOCALIZER_WINDOW:
+		#Load Positive descriptors
+        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=1" ,(self.id , algorithm.id))
+        for r in cur:
+            descsPos.append(r[0])
         
         #Load Negative descriptors
-        #cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=0" ,(self.id , algorithm.id))
-        #for r in cur:
-        #    descsNeg.append(r[0])
+        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=0" ,(self.id , algorithm.id))
+        for r in cur:
+            descsNeg.append(r[0])
           
         ##Load BOW Vocabulary
         cur.execute("SELECT descriptor from vocabData t join category c on t.category=c.id where c.id = ? and algorithm=?" ,(self.id , algorithm.id))
@@ -1233,8 +1402,8 @@ def loadCategories(train=1):
 
     cats=[]
     cur = conn.cursor()
-    cur.execute("select id,name,bandwidth,SVM from category ")
+    cur.execute("select id,name,bandwidth,SVM,PCA from category ")
     for r in cur:
-        c=Category(r[0],r[1],r[2],r[3],train=train)
+        c=Category(r[0],r[1],r[2],r[3],r[4],train=train)
         cats.append(c)
     return cats

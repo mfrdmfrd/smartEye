@@ -11,10 +11,13 @@ import threading
 import sqlite3
 import random
 #from osgeo import gdal,ogr,osr
+from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import average_precision_score
 
 class objfind():#threading.Thread):
     def __init__(self, algorithm, epsilon_ = 0.2,min_pts_per_cluster_=3,accuracy_=0.75,
-                 category='Aircraft',i=0,bandwidth=0,dbscan=0,graph=1,geo=0,testpath=None,
+                 category='Aircraft',i=0,bandwidth=0,graph=1,geo=0,testpath=None,
                  notes='None',localizer=0,window_size_factor=2,
             window_overlapping_factor=.5): 
         #threading.Thread.__init__(self) 
@@ -32,7 +35,6 @@ class objfind():#threading.Thread):
         os.makedirs(self.Testingdir_out, exist_ok=True)
         self.log_file = open(os.path.join(self.out_dir , 'output.log'), 'w')
         self.category=category
-        #self.clusteringDBSCAN=dbscan
         self.graph=graph
         if testpath == None:
             testpath=m.Testingdir_in
@@ -46,7 +48,7 @@ class objfind():#threading.Thread):
         self.geo=geo
         self.notes=notes
 
-    def run_bow(self):
+    def run_bow(self,t=0):
         self.startTime=datetime.now()#.strftime('%Y%m%d_%H%M%S.%f')
         self.files=[]
         self.gtfiles=[]
@@ -80,12 +82,17 @@ class objfind():#threading.Thread):
                         o=band*self.window_overlapping_factor    #Windows overlapping                         
                         step=band-o
 
+                        #########################################################################
+                        ##########################Localize test points###########################
+                        #########################################################################
+
                         if self.localizer==m.LOCALIZER_WINDOW:
                             m.log("Using Window(" + str(band) + "," + str(o) + ") Scan to Localize Targets...")
                             rows,cols,ch=img.shape
                             cluster_centers=np.array([np.array([i,j]) for j in range(int(band/2),rows,int(step))
                                              for i in range(int(band/2),cols,int(step))])
-                        
+                            #cluster_centers=np.array([np.array([i,j]) for j in range(int(band/2),rows)
+                            #                 for i in range(int(band/2),cols)])
                         else:
 
 
@@ -120,14 +127,32 @@ class objfind():#threading.Thread):
                             #Create images of results and save it(self.graph -> 0: No Graphs, 1: create and save but no show, 2: create and save and show)
                             if self.graph:
                                 m.plot_features(img,good_kps,1,os.path.join(self.Testingdir_out, 'good_kps_'+ testfile))
-                            
+
+                        #########################################################################
+                        #########################Test Candidate Objects##########################
+                        #########################################################################
                         cc_f=[]
                         cc_p=[]
-                        hist_all=[]
-                        self.algorithm.bowextractor.setVocabulary(self.category.vocab)
+                        SVMTestData==[]
+                        SVMTestLabel=[]
+                        
+                        TT=m.load_truth_table2(gtfile)
+                        matched=np.array(np.zeros(len(TT)))
 
+                        
+                        self.algorithm.bowextractor.setVocabulary(self.category.vocab)
+                        
                         for c in cluster_centers:
-                            #print(c[1]-band/2,c[1]+band/2,c[0]-band/2,c[0]+band/2)
+                            a,d = m.find_nearest_position3(c,TT,matched)
+                            if d < band:
+                                SVMTestLabel.extend([1])
+                                matched[a]=1
+                            else:
+                                SVMTestLabel.extend([0])
+
+                        ############################   
+                        for c in cluster_centers:
+                                
                             patch=img[c[1]-band/2:c[1]+band/2,c[0]-band/2:c[0]+band/2]     #TODO may need enlargement
 
                             #patch_kps=self.algorithm.detector.detect(patch)
@@ -135,50 +160,59 @@ class objfind():#threading.Thread):
                             #m.plot_features2(patch,patch_kps,0)
 
                             hist=self.algorithm.bowextractor.compute(patch,patch_kps,patch_descs)
-                            if hist is not None:
-                                cc_f.extend(self.category.SVM.predict(hist))
-                                cc_p.extend(self.category.SVM.predict_proba(hist))
-                            else:
-                                cc_f.extend([0])
-                                hist=np.zeros(len(self.category.vocab), dtype=np.float32)
-                            
-                            hist_all.extend(hist) 
-                            
-                                
-                            if self.graph>2 and patch_kps!=[]:
-                                
-                                p_t=cv2.drawKeypoints(patch,patch_kps,None,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-                                if len(patch.shape)==3 :
-                                    b,g,r = cv2.split(p_t)       # get b,g,r    
-                                    plt.imshow(cv2.merge([r,g,b]))
-                                else:
-                                    plt.imshow(p_t)
-                                #plt.savefig(os.path.join(self.Testingdir_out,'kps_' + filename + '.png'))
-                                plt.show()                                                             
                             patch=None                  
-                        #hist_all=np.asarray(hist_all)
-                        #df=self.category.SVM.decision_function(hist_all)
+                            if hist is None:
+                                hist=np.zeros(len(self.category.vocab), dtype=np.float32)
+                                hist=hist.reshape(1,100)
+                            
+                            SVMTestData.extend(hist)
+                        
+                        X_test=np.array(SVMTestData)
+                        y_test=np.array(SVMTestLabel)     
+                        ##########################
+                        if algorithm.pca_n>0:
+                            X_test=self.category.PCA.transform(X_test)
+                        ##########################
+                        self.score=self.category.SVM.score(X_test,y_test)
+                        cc_p=self.category.SVM.predict_proba(X_test)
+                        self.fpr, self.tpr, thresholds = roc_curve(SVMTestLabel, cc_p[:, 1])
+                        self.roc_auc = auc(fpr, tpr)
+
+
+                        m.log('Score = ' + str(self.score))
+                        m.log('AUC = ' + str(self.roc_auc))
+
+                        #for c in cluster_centers:
+                        #    if hist is not None:
+                        #        if algorithm.pca_n>0:
+                        #            hist=self.category.PCA.transform(hist)
+                                
+                        #        decision=self.category.SVM.predict(hist)
+                        #        prob=self.category.SVM.predict_proba(hist)
+                        #        if t==0:
+                        #            cc_f.extend(decision)
+                        #        else:
+                        #            if prob[0][1] > t:
+                        #                cc_f.extend([1])
+                        #            else:
+                        #                cc_f.extend([0])
+                        #        if decision == [1]:
+                        #            m.log('Positive , Prob =  ' + str(prob))
+                        #        cc_p.extend(prob)
+                        #    else:
+                        #        cc_f.extend([0])
+                  
 
                         detected_targets_for_file = m.pixelToLatLon(testFile_path,cluster_centers,cc_f)        
-                        #Filter by score of the cluster         
-                        #for k in range(len(cc_f)):
-                        #    m.log(detected_targets_for_file[k] + ' : ' + cc_f[k],self.log_file,print_=1)                        
-                        
-
-                        TT=m.load_truth_table2(gtfile)
 
                         m.log('Detected Objects all:  ' + str(len(cluster_centers)),self.log_file)
                         m.log('Filtered Detected Objects:  ' + str(np.sum(cc_f)),self.log_file)
                         m.log('True Objects:  ' + str(len(TT)),self.log_file)
 
-               
-                        
- 
-                    
                         #Create images of results and save it(self.graph -> 0: No Graphs, 1: create and save but no show, 2: create and save and show)
                         if self.graph:
-                            m.plot_features_and_cluster_centers(img,cluster_centers,None,cluster_labels,good_kps, self.graph,
-                                                                os.path.join(self.Testingdir_out,'objects_'+ testfile))
+                            #m.plot_features_and_cluster_centers(img,cluster_centers,None,cluster_labels,good_kps, self.graph,
+                            #                                    os.path.join(self.Testingdir_out,'objects_'+ testfile))
                             m.plot_features_and_cluster_centers(img,cluster_centers,cc_f,cluster_labels,good_kps, self.graph,
                                                                 os.path.join(self.Testingdir_out,'filtered_objects_'+ testfile))
                         img=None
@@ -186,8 +220,7 @@ class objfind():#threading.Thread):
                         ##Disabled during test HAN Dataset
                         if self.geo:
                             self.save_results_as_shp(filename,detected_targets_for_file)
-                        
-                        #HanIncompatible
+
                         #Caculate stats of operation for this file
                         #self.results=[self.precision,self.recall,self.tpos,self.fpos,self.fneg,self.fecho]
                         if self.geo:
@@ -223,6 +256,16 @@ class objfind():#threading.Thread):
 
             conn.close()
 
+    def plot_roc(self):
+        plt.plot(self.fpr, self.tpr, lw=1, label='ROC  (area = %0.2f)' % (roc_auc,))
+        plt.plot([0, 1], [0, 1], '--', color=(0.6, 0.6, 0.6), label='Luck')
+        plt.xlim([-0.05, 1.05])
+        plt.ylim([-0.05, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic')
+        plt.legend(loc="lower right")
+        plt.show()
 
     def saveOperation(self,conn):
         #conn = sqlite3.connect(m.db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
