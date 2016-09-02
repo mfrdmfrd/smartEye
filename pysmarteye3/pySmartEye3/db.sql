@@ -20,30 +20,31 @@ CREATE TABLE "trainingData" (
 	`positive`	INTEGER,
 	`clusterCenter`	INTEGER
 );
-CREATE TABLE "ops_out" (
+CREATE TABLE `ops_out` (
 	`ID`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+	`category`	INTEGER,
+	`algorithm`	INTEGER,
 	`start_time`	TEXT,
 	`end_time`	TEXT,
-	`epsilon`	REAL,
-	`min_pts_per_cluster`	NUMERIC,
+	`time`	TEXT,
 	`accuracy`	INTEGER,
 	`precision`	REAL,
 	`recall`	REAL,
-	`time`	REAL,
-	`tpos`	INTEGER,
+	`tpos`	TEXT,
 	`fpos`	INTEGER,
 	`fneg`	INTEGER,
 	`echo`	INTEGER,
-	`algorithm`	INTEGER,
 	`bandwidth`	REAL,
 	`Notes`	TEXT,
-	`precision_f`	INTEGER,
-	`recall_f`	INTEGER,
-	`tpos_f`	INTEGER,
-	`fpos_f`	INTEGER,
-	`fneg_f`	INTEGER,
-	`echo_f`	INTEGER,
-	`category`	INTEGER
+	`min_pts_per_cluster`	NUMERIC,
+	`epsilon`	REAL,
+	`localizer`	INTEGER,
+	`wsf`	REAL,
+	`wof`	REAL,
+	`reduced_k`	REAL,
+	`y_test`	BLOB,
+	`y_score`	BLOB,
+	`soft_encoding`	INTEGER
 );
 CREATE TABLE "category" (
 	`ID`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

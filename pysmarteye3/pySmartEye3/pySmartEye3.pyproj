@@ -23,9 +23,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="graph.py" />
-    <Compile Include="main.py" />
+    <Compile Include="master.py" />
     <Compile Include="mylibrary.py" />
-    <Compile Include="ObjFind.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="db.sql" />

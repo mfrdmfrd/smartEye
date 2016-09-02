@@ -15,8 +15,12 @@ from sklearn.cluster import MiniBatchKMeans as KMeans
 import logging
 import sys
 from sklearn.decomposition import RandomizedPCA
-
-
+import copy
+from datetime import datetime
+from datetime import timedelta
+from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import average_precision_score
 #import matplotlib.cm as cm
 #import pickle
 #import re
@@ -24,6 +28,8 @@ from sklearn.decomposition import RandomizedPCA
 #from PyQt4 import QtGui
 #import gdal,ogr,osr
 #import db
+
+global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath, LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer,gray
 
 def adapt_array(arr):
     out = io.BytesIO()
@@ -36,9 +42,14 @@ def convert_array(text):
     out.seek(0)
     return np.load(out)
 
-def initialize_parameteres(data_root_='E:\\Master\\Data\\',dbname="train.db"):
-    global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath, LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer
-    # Display progress logs on stdout
+def initialize_parameteres(data_root_='.\\Data\\',dbname="train.db"):
+    global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath
+    global LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer,gray
+    global epsilon,min_pts_per_cluster,accuracy,retrain,graph
+    global window_overlapping_factor,window_size_factor
+    global reduced,SoftCoding
+
+# Display progress logs on stdout
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
     data_root = data_root_
@@ -199,7 +210,7 @@ def filter_features_clusters2(cluster_centers,labels,kps,bandwidth):
 #    if savefig > 1:
 #        plt.show()
 
-def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,savefig=0,img_name=''):
+def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,savefig=0,img_name='',title=''):
     
     if len(img.shape)==3 :
         b,g,r = cv2.split(img)       # get b,g,r    
@@ -211,15 +222,16 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
     n_clusters_ = len(cluster_centers)
     count=0
     for k, col in zip(range(n_clusters_), colors):
-        if cc_f is None or cc_f[k] > 0:
+        if cc_f is None or cc_f==[] or cc_f[k] > 0:
             cluster_center = cluster_centers[k]
             my_members = labels == k
             plt.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor='none',
-                        markeredgecolor=col, markersize=20)
+                        markeredgecolor='r', markersize=20)
             if labels!=[]:
-                plt.plot(src_pts[my_members, 0], src_pts[my_members, 1], 'r' + '.')
+                plt.plot(src_pts[my_members, 0], src_pts[my_members, 1], col + '.')
             count+=1
     plt.axis('off')
+    #plt.title(title)
 
     plt.title('Number of clusters: %d' % count)
     if savefig:
@@ -230,30 +242,30 @@ def plot_features_and_cluster_centers(img,cluster_centers,cc_f,labels,src_pts,sa
         plt.show()
     plt.close()
 
-def plot_features2(img,key_pts,savefig=1,imagePath='',title='Plot Features 2'):
+def plot_features2(img,key_pts,savefig=1,imagepath='unknown_path.png',title='Plot Features 2'):
     
-    if len(img.shape)==3 :
-        b,g,r = cv2.split(img)       # get b,g,r    
-        img2=cv2.merge([r,g,b])
-    else:
-        img2=img
-            
-    src_pts=[kp.pt for kp in key_pts] #get coordinates from ketpoint class 
-    if src_pts!=[]:
-        x, y = zip(*src_pts)
-    else:
-        x,y=[],[]
-    
-    plt.imshow(img2)
-    #plt.title(title)
-    plt.axis('off')
-    if len(src_pts) > 0:
-        plt.plot(x,y, 'r' + '.')
     if savefig:
-        plt.savefig(imagePath,bbox_inches='tight')
-    if savefig>1:
-        plt.show()
-    plt.close()
+        if len(img.shape)==3 :
+            b,g,r = cv2.split(img)       # get b,g,r    
+            img2=cv2.merge([r,g,b])
+        else:
+            img2=img
+            
+        src_pts=[kp.pt for kp in key_pts] #get coordinates from ketpoint class 
+        if src_pts!=[]:
+            x, y = zip(*src_pts)
+        else:
+            x,y=[],[]
+    
+        plt.imshow(img2)
+        plt.title(title)
+        plt.axis('off')
+        if len(src_pts) > 0:
+            plt.plot(x,y, 'r' + '.')
+        plt.savefig(imagepath,bbox_inches='tight')
+        if savefig>1:
+            plt.show()
+        plt.close()
 
 
     #sizes = np.shape(img2)
@@ -284,7 +296,7 @@ def plot_features(img,src_pts,savefig=1,imagePath=''):
         plt.plot(src_pts[:,0],src_pts[:,1], 'r' + '.')
     plt.title('Good Features')
     if savefig:
-        plt.savefig(imagePath)
+        plt.savefig(imagePath,bbox_inches='tight')
     plt.close()
 
 def load_truth_table(img_file_name):
@@ -302,8 +314,8 @@ def load_truth_table2(gtfile):
             del l[-1]
             for i in range (4):
                 l[i]=int(l[i].strip('()'))
-            x=l[2]-l[0]+l[0]
-            y=l[3]-l[1]+l[1]        
+            x=l[0]+(l[2]-l[0])/2
+            y=l[1]+(l[3]-l[1])/2         
             TT.append([x,y])
     return TT
 
@@ -629,7 +641,7 @@ class Sample:
         self.kps= []
  
     def get_img(self):
-        img=cv2.imread(self.file_path,cv2.IMREAD_COLOR)
+        img=cv2.imread(self.file_path,cv2.IMREAD_GRAYSCALE if gray else cv2.IMREAD_COLOR)
         if (self.aoi==[]):
             return img
         else:  
@@ -649,7 +661,11 @@ class Sample:
         #src = osr.SpatialReference()
         #wkt=gimg.GetProjection()
         
-        row,col,ch=gimg.shape
+        if gray:
+            rows,cols=gimg.shape
+        else:
+            rows,cols,ch=gimg.shape
+
         gimg=None
         if (self.aoi==[]):
             self.width=col
@@ -701,18 +717,21 @@ class switch(object):
             return False
 
 class Algorithm:
-    def __init__(self, det_name,des_name=None,bow=False,k=1000,matcher="FLANN",pca_n=0):
+    def __init__(self, det_name,des_name=None,k=1000,n=0,matcher="FLANN"):
         self.detector_name = det_name
         self.des_name = des_name
 
         self.get_id()
         
+        
         FLANN_INDEX_KDTREE = 0
         index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
         search_params = dict(checks = 50)
-        self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
- 
-        #self.matcher=cv2.BFMatcher()
+        
+        if matcher == 'FLANN':
+            self.matcher = cv2.FlannBasedMatcher(index_params, search_params) 
+        else:
+            self.matcher=cv2.BFMatcher()
 
         conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
         cur=conn.cursor()
@@ -751,7 +770,7 @@ class Algorithm:
                 self.des_name=self.detector_name
         self.k=k
         self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
-        self.pca_n=pca_n
+        self.n=n
 
     def search(self,category):
         import ObjFind as o
@@ -837,12 +856,19 @@ class Category:
         self.samplesPos=[]
         self.samplesNeg=[]   
         self.training_data_pos=[]
-        self.training_data_neg=[]     
+        self.training_data_neg=[]
+        self.training_data_all=[]
+     
         self.cat_traindata_path=os.path.join(Trainingdir_in, self.name)
         self.cat_testdata_path=os.path.join(Testingdir_in, self.name)
-        
-        
-        self.PCA=SVM
+        self.reduced_training_data_pos=[]
+        self.reduced_training_data_neg=[]
+
+        self.SVMTrainLabel=[]
+        self.SVMTrainData=[]
+        self.vocab=[]
+
+        self.PCA=PCA
         self.SVM=SVM
 
         #if SVM is not None:
@@ -851,7 +877,7 @@ class Category:
         #    self.SVM=None
         self.bandwidth=int(bandwidth)
 
-        if train and os.path.exists(self.cat_traindata_path):
+        if train==1 and os.path.exists(self.cat_traindata_path):
             self.load_samples()
         #self.training_data= [[],[]]     #All kps of the all samples in the category
         
@@ -876,7 +902,7 @@ class Category:
 
         if os.path.exists(self.training_pos_c_input_path):
             for file in os.listdir(self.training_pos_c_input_path):
-                #log('Reading Positive Combosite Sample: ' + file)
+                log('Reading Positive Combosite Sample: ' + file)
                 filename,extension = file.rsplit('.',1)
                 if (extension=="tif" or extension=="jpg" or extension=="png"): 
                     gt_filename=os.path.join(self.training_gt_input_path,filename + '.txt')
@@ -917,8 +943,11 @@ class Category:
                     #        for i in range (4):
                     #            l[i]=int(l[i].strip('()'))
                     b=self.bandwidth
-                    img=cv2.imread(os.path.join(self.training_neg_c_input_path,file))
-                    rows,cols,ch=img.shape
+                    img=cv2.imread(os.path.join(self.training_neg_c_input_path,file),cv2.IMREAD_GRAYSCALE if gray else cv2.IMREAD_COLOR)
+                    if gray:
+                        rows,cols=img.shape
+                    else:
+                        rows,cols,ch=img.shape
                     cc=np.array([[i,j] for i in range(int(b/2),cols,b) for j in range(int(b/2),rows,b)])#Get centers of patches
                     for c in cc:#for each patch center
                         l=[c[0]-b/2,c[1]-b/2,c[0]+b/2,c[1]+b/2]#get left up corener and bottom righ corner coords
@@ -956,40 +985,57 @@ class Category:
         self.bandwidth=int(sqrt(pow(self.max_heightM,2)+pow(self.max_widthM,2))*0.75)
         log(self.name + ' Bandwidth = ' + str(self.bandwidth))
 
-        
-    def train3(self,algorithm,retrain=1):#
+################################################################
+##########################Train###############################
+#################################################################     
+    def train3(self,algorithm,retrain=1,reduced=0):#
+        log(self.name + ': Loading training data from DB ...')
         self.training_data_pos,self.training_data_neg,self.vocab=self.loadTrainData2(algorithm)
-        #log(self.vocab)
+        self.training_data_all=np.concatenate((self.training_data_pos,self.training_data_neg), axis=0)
+        
+        
         log(self.name + ': training data pos found in db: ' + str(len(self.training_data_pos)))
         log(self.name + ': training data Neg found in db: ' + str(len(self.training_data_neg)))
         log(self.name + ': training vocabulary found in db: ' + str(len(self.vocab)))
         if self.SVM is not None:
             log(self.name + ': SVMs found in db. ')
-
+        
 #######################################
         if len(self.vocab)==0:
             if len(self.samplesPos)==0:
-                assert('No Trainng Data')
-                return
-            else:
-                self.calculate_train_data(algorithm)
-                self.build_vocab(algorithm)
-                self.build_training_hitsograms(algorithm)
-                self.train_classifier()
+                self.load_samples()
+                if len(self.samplesPos)==0:
+                    raise('No Trainng Data')
+                    return
+            self.calculate_train_data(algorithm)
+            if reduced:
+                self.reduce_training_data(reduced)
+            self.build_vocab(algorithm)
+            self.build_training_hitsograms(algorithm)
+            
+            self.train_classifier(algorithm)
         else:
             if len(self.samplesPos)>0:
                 if retrain:# and query_yes_no('Training Vocabulary found, Construct Again?','no'):
-                    self.calculate_train_data(algorithm)
-                    self.build_vocab(algorithm)
-                    self.build_training_hitsograms(algorithm)
-                    if algorithm.pca_n>0 :
-                        self.build_pca(algorithm.pca_n)
-                    self.train_classifier()
+                    if retrain ==1:
+                        self.calculate_train_data(algorithm)
+                        if reduced:
+                            self.reduce_training_data(reduced)
+                        self.build_vocab(algorithm)
+                        self.build_training_hitsograms(algorithm)
+         
+                    self.train_classifier(algorithm)
+
+    
 
     def calculate_train_data(self,algorithm):
-        log('Training samples.')
+        if len(self.samplesPos)==0:
+            self.load_samples()
+
+        log(self.name + ': Training samples...')
         sp_count=len(self.samplesPos)
         sn_count=len(self.samplesNeg)
+        #if len(self.training_data_pos)>0 and query_yes_no('Training data found, pos='+str(len(self.training_data_pos))+',Neg='+str(len(self.training_data_neg))+ ',\n Construct Again?','no'):
         self.training_data_pos=[]
         self.training_data_neg=[]
         i=1
@@ -1004,7 +1050,7 @@ class Category:
                 self.training_data_pos.extend(s.kps[1])
         log('Positive Features Collected : ' + str(len(self.training_data_pos)))    
         
-#################################
+    #################################
         i=1
         for s in self.samplesNeg:
             #log('Training sample Neg ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
@@ -1020,19 +1066,296 @@ class Category:
               
 ##################################         
         self.training_data_all=np.concatenate((self.training_data_pos,self.training_data_neg), axis=0)
-        #self.training_data_all=self.reduced_training_data_pos.copy()
-        #self.training_data_all.extend(self.reduced_training_data_neg)
-        #self.training_data_all=self.reduced_training_data_pos+self.reduced_training_data_neg
-#####################################            
+        
+        
+    def build_vocab(self,algorithm):
+        #Build Vocanulary
 
-    def reduce_training_data(self,k):
-        self.training_data_pos=self.clusterTrainData(self.training_data_pos,k)#Reduced Training data is descriptors only. no KP
+        log(self.name + ': Building Vocabulary')
+        
+        if len(self.training_data_all)==0:
+            self.calculate_train_data(algorithm)
+
+
+        if algorithm.k<1:
+            K=int(algorithm.k*len(self.training_data_all))
+        else:
+            K=algorithm.k
+        bowTrainer=cv2.BOWKMeansTrainer(K)
+        
+
+        self.vocab=self.clusterTrainData(self.training_data_all,K)
+        #self.vocab=bowTrainer.cluster(np.array(self.training_data_all))
+        
+
+        algorithm.bowextractor.setVocabulary(self.vocab)
+    ###################################################               
+        #log('Saving Vocabulary')
+        #self.saveTrainData(algorithm)
+
+    def build_training_hitsograms(self,algorithm):
+        #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
+        log('Building Histogram')
+        #Build Histograms
+        self.SVMTrainLabel=[]
+        self.SVMTrainData=[]
+        
+        if len(self.samplesPos) == 0:
+            self.load_samples()
+            
+        sp_count=len(self.samplesPos)
+        sn_count=len(self.samplesNeg)
+        
+        if len(self.vocab)==0:
+            self.build_vocab(algorithm)
+
+        algorithm.bowextractor.setVocabulary(self.vocab)
+        i=1
+        for s in self.samplesPos:
+            log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            if s.kps==[]:
+                s.kps=algorithm.get_kps(img)
+            if s.kps[0] != None and s.kps[0] != []:
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                self.SVMTrainLabel.extend([1])
+                self.SVMTrainData.extend(s.hist)
+            img=None
+        i=1
+        b=self.bandwidth
+        for s in self.samplesNeg:
+            log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+            i+=1
+            img=s.get_img()
+            if s.kps==[]:
+                s.kps=algorithm.get_kps(img)
+            if s.kps[0] != None and s.kps[0] != []:
+                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                self.SVMTrainLabel.extend([0])
+                self.SVMTrainData.extend(np.array(s.hist))
+            img=None
+        self.X_train=np.array(self.SVMTrainData)
+        self.y_train=np.array(self.SVMTrainLabel)
+        log('Histograms Calculated')
+
+    def train_classifier(self,algorithm):        
+        if self.SVMTrainData == []:
+            self.build_training_hitsograms(algorithm)
+            
+        log('Building PCA')
+        self.X_train=np.array(self.SVMTrainData)
+        self.y_train=np.array(self.SVMTrainLabel)        
+        if algorithm.n>0:
+            self.PCA=RandomizedPCA(algorithm.n, whiten=True).fit(self.X_train)
+            self.X_train = self.PCA.transform(self.X_train)
+            
+        log('Training Classifier')
+        self.SVM = svm.SVC(probability=True)
+        self.SVM.fit(self.X_train,self.y_train)
+
+        self.saveSVM()
+###################################################    
+
+    def clusterTrainData(self,data,factor=0.1):
+        if factor<1:
+            k=int(len(data)*factor)
+        else:
+            k=factor
+        if k>0 and len(data)>0:
+            est=KMeans(k,init_size=k*4)
+            log('Clustering Composite features...')
+            est.fit(data)
+            labels = est.labels_
+            reduced_data=est.cluster_centers_
+            return reduced_data.astype(np.float32)
+        else:
+            #return np.array([], dtype=np.float32).reshape(0,128)
+            return None
+
+    def saveTrainData_(self,algorithm):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        conn.execute("delete from vocabData where category=? and algorithm=?",(self.id,algorithm.id))
+        conn.execute("delete from TrainingData where category=? and algorithm=?",(self.id,algorithm.id))
+        
+        for des in self.training_data_pos:
+            conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,1)",
+                         (des, self.id, algorithm.id))
+        for des in self.training_data_neg:
+            conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,0)",
+                         (des, self.id, algorithm.id))
+
+        for v in self.vocab:
+            conn.execute("insert into vocabData (descriptor,category,algorithm)values(?,?,?)",
+                            (v, self.id, algorithm.id))
+        s = pickle.dumps(self.SVM)
+        p = pickle.dumps(self.PCA)
+
+        conn.execute("update category set svm=?, bandwidth=?, pca=? where id=?", (s,self.bandwidth,p, self.id))
+        
+        conn.commit()
+        conn.close()   
+
+    def saveTrainData2(self,algorithm):
+        import copy
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        s = pickle.dumps(self.SVM)
+        p = pickle.dumps(self.PCA)
+        v = pickle.dumps(self.vocab)
+        tp = pickle.dumps(self.training_data_pos)
+        tn = pickle.dumps(self.training_data_neg)
+
+        conn.execute("insert into classifier (category,algorithm,SVM,PCA,traindata_pos,traindata_neg,vocab)values(?,?,?,?,?,?,?)",
+                         ( self.id, algorithm.id,s,p,tp,tn,v))
+        c=copy.deepcopy(self)
+        for s in c.samplesPos:
+            if len(s.kps)>0:
+                s.kps[0][:]=[]
+        for s in c.samplesNeg:
+            if len(s.kps)>0:
+                s.kps[0][:]=[]
+        cs = pickle.dumps(c)
+        
+        conn.execute("update category_pickle set enabled=0 where category=? and algorithm=?",(self.id,algorithm.id))
+        conn.execute("insert into category_pickle (category,algorithm,pickle) values(?,?,?)", (self.id,algorithm.id,cs))
+        conn.commit()
+        conn.close()   
+        
+                    
+    def saveSVM(self):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        s = pickle.dumps(self.SVM)
+        p = pickle.dumps(self.PCA)
+
+        conn.execute("update category set svm=?, bandwidth=?, pca=? where id=?", (s,self.bandwidth,p, self.id))                
+        conn.commit()
+        conn.close()     
+           
+    def savePCA(self):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur=conn.cursor()
+
+        s = pickle.dumps(self.PCA)
+        conn.execute("update category set pca=? where id=?", (s,self.id))
+        conn.commit()
+        conn.close() 
+                   
+    def loadTrainData2(self,algorithm,):
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+
+        cur = conn.cursor()
+        descsPos=[]
+        descsNeg=[]
+        Vocab=[]
+        
+       # if localizer!=LOCALIZER_WINDOW:
+		#Load Positive descriptors
+        cur.execute("SELECT descriptor  from trainingData t join category c on (t.category=c.id and t.algorithm=c.algorithm) where c.id = ? and c.algorithm=? and positive=1" ,(self.id , algorithm.id))
+        for r in cur:
+            descsPos.append(r[0])
+        
+        #Load Negative descriptors
+        cur.execute("SELECT descriptor  from trainingData t join category c on  (t.category=c.id and t.algorithm=c.algorithm) where c.id = ? and c.algorithm=? and positive=0" ,(self.id , algorithm.id))
+        for r in cur:
+            descsNeg.append(r[0])
+          
+        ##Load BOW Vocabulary
+        cur.execute("SELECT descriptor from vocabData t join category c on (t.category=c.id and t.algorithm=c.algorithm) where c.id = ? and c.algorithm=?" ,(self.id , algorithm.id))
+        for r in cur:
+            desc=np.array(r[0])
+            Vocab.append(desc)
+
+        conn.close()
+        return descsPos,descsNeg,np.asarray(Vocab,dtype=np.float32)
+
+    def match_features(self,des1,des2,algorithm,accuracy = 0.75):#BOW
+        if des1 is None or des1==[] or des2 is None or des2==[]:
+            return []
+            
+        good = []
+        if len(des1)>0 and len(des2)>0:
+            matches = algorithm.matcher.knnMatch(des1,np.asarray(des2,np.float32),k=2)
+            for m,n in matches:
+                if m.distance < accuracy * n.distance:
+                    good.append(m)
+        
+        return good                    
+
+    def get_detection_stats(self,TT,CC):
+        bandwidth=self.bandwidth
+        tpos =0
+        fpos =0
+        fneg=len(TT)
+        fecho=0
+        matched=np.array(np.zeros(len(TT)))
+        if len(CC)>0:
+            for cc in CC:
+                i,d = find_nearest_position(cc,TT)
+                if d < bandwidth:
+                    #print ('Point ', cc, ' --> Nearest Point : ', TT[i], ' @ Distance : ', d)
+                    matched[i]+=1
+                    if matched[i]==1:
+                        tpos+=1
+                        fneg-=1
+                    else:
+                        fecho+=1
+                else:
+                    #print ('Point ', cc, ' --> No Match, Min distance found : ', d)
+                    fpos+=1
+         
+            precision = (tpos/(tpos+fpos))
+            recall = tpos/(tpos+fneg) 
+        else:
+            precision,recall=0,0
+
+        return [precision,recall,tpos,fpos,fneg,fecho]
+
+    def get_detection_stats2(self,TT,CC):
+        bandwidth=self.bandwidth
+        tpos =0
+        fpos =0
+        fneg=len(TT)
+        fecho=0
+        matched=np.array(np.zeros(len(TT)))
+        if len(CC)>0:
+            for cc in CC:
+                i,d = find_nearest_position2(cc,TT)
+                if d < bandwidth:
+                    #print ('Point ', cc, ' --> Nearest Point : ', TT[i], ' @ Distance : ', d)
+                    matched[i]+=1
+                    if matched[i]==1:
+                        tpos+=1
+                        fneg-=1
+                    else:
+                        fecho+=1
+                else:
+                    #print ('Point ', cc, ' --> No Match, Min distance found : ', d)
+                    fpos+=1
+         
+            precision = (tpos/(tpos+fpos))
+            recall = tpos/(tpos+fneg) 
+        else:
+            precision,recall=0,0
+
+        return [precision,recall,tpos,fpos,fneg,fecho]
+    
+
+    def generate_reduced_pos_training_data(self,k_):
+        if k_<1:
+            kp=int(k_*len(self.training_data_pos))
+            kn=int(k_*len(self.training_data_neg))
+        else:
+            kp=kn=k_
+    
+        self.reduced_training_data_pos=self.clusterTrainData(self.training_data_pos,kp)#Reduced Training data is descriptors only. no KP
         log('Positive Features Reduced to ' + str(len(self.reduced_training_data_pos)))
-        self.training_data_neg=self.clusterTrainData(self.training_data_neg,k)#Reduced Training data is descriptors only. no KP
-        log('Negative Features Reduced to ' + str(len(self.reduced_training_data_neg))) 
-
-        self.training_data_all=np.concatenate((self.reduced_training_data_pos,self.reduced_training_data_neg), axis=0)
-
+        
     def saveTrainDataFull(self,algorithm):
         conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
         cur=conn.cursor()
@@ -1096,242 +1419,6 @@ class Category:
 #        #self.training_data_all.extend(self.reduced_training_data_neg)
 #        #self.training_data_all=self.reduced_training_data_pos+self.reduced_training_data_neg
 ######################################            
-        
-    def build_vocab(self,algorithm):
-        #Build Vocanulary
-
-        log('Building Vocabulary')
-        
-        
-        if algorithm.k<1:
-            K=int(algorithm.k*len(self.training_data_all))
-        else:
-            K=algorithm.k
-            
-        bowTrainer=cv2.BOWKMeansTrainer(K)
-        #######vocab=self.clusterTrainData(self.training_data_all,K)
-        #vocab=bowTrainer.cluster(np.array(self.training_data_all))
-        ########self.vocab = vocab
-        algorithm.bowextractor.setVocabulary(self.vocab)
-###################################################               
-        log('Saving Vocabulary')
-        self.saveTrainData(algorithm)
-###################################################
-
-    def build_training_hitsograms(self,algorithm):
-        #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
-        log('Building Histogram')
-        #Build Histograms
-        self.SVMTrainLabel=[]
-        self.SVMTrainData=[]
-        sp_count=len(self.samplesPos)
-        sn_count=len(self.samplesNeg)
-
-
-        i=1
-        for s in self.samplesPos:
-            log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
-            i+=1
-            img=s.get_img()
-            if s.kps==[]:
-                s.kps=algorithm.get_kps(img)
-            if s.kps[0] != None and s.kps[0] != []:
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                self.SVMTrainLabel.extend([1])
-                self.SVMTrainData.extend(s.hist)
-            img=None
-        i=1
-        b=self.bandwidth
-        for s in self.samplesNeg:
-            log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
-            i+=1
-            img=s.get_img()
-            if s.kps==[]:
-                s.kps=algorithm.get_kps(img)
-            if s.kps[0] != None and s.kps[0] != []:
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                self.SVMTrainLabel.extend([0])
-                self.SVMTrainData.extend(np.array(s.hist))
-            img=None
-        self.X_train=np.array(self.SVMTrainData)
-        self.y_train=np.array(self.SVMTrainLabel)
-        log('Histograms Calculated')
-
-    def build_pca(self,n):
-        self.PCA=RandomizedPCA(n, whiten=True).fit(self.X_train)
-        self.X_train = self.PCA.transform(self.X_train)
-        self.savePCA()
-
-    def train_classifier(self):        
-        log('Training Classifier')
-
-
-        self.SVM = svm.SVC(probability=True)
-        self.SVM.fit(self.X_train,self.y_train)
-
-            
-
-        self.saveSVM()
-###################################################    
-
-    def clusterTrainData(self,data,factor=0.1):
-        if factor<1:
-            k=int(len(data)*factor)
-        else:
-            k=factor
-        if k>0 and len(data)>0:
-            est=KMeans(k,init_size=k*4)
-            log('Clustering Composite features...')
-            est.fit(data)
-            labels = est.labels_
-            reduced_data=est.cluster_centers_
-            return reduced_data.astype(np.float32)
-        else:
-            return np.array([], dtype=np.float32).reshape(0,128)
-
-
-    def saveTrainData(self,algorithm):
-        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
-        cur=conn.cursor()
-
-        conn.execute("delete from vocabData where category=? and algorithm=?",(self.id,algorithm.id))
-        conn.execute("delete from TrainingData where category=? and algorithm=?",(self.id,algorithm.id))
-        
-        for des in self.training_data_pos:
-            conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,1)",
-                         (des, self.id, algorithm.id))
-        for des in self.training_data_neg:
-            conn.execute("insert into TrainingData (descriptor,category,algorithm,positive)values(?,?,?,0)",
-                         (des, self.id, algorithm.id))
-
-        for v in self.vocab:
-            conn.execute("insert into vocabData (descriptor,category,algorithm)values(?,?,?)",
-                            (v, self.id, algorithm.id))
-        conn.commit()
-        conn.close()   
-             
-    def saveSVM(self):
-        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
-        cur=conn.cursor()
-
-        s = pickle.dumps(self.SVM)
-        conn.execute("update category set svm=?, bandwidth=? where id=?", (s,self.bandwidth,self.id))
-        conn.commit()
-        conn.close()     
-           
-    def savePCA(self):
-        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
-        cur=conn.cursor()
-
-        s = pickle.dumps(self.PCA)
-        conn.execute("update category set pca=? where id=?", (s,self.id))
-        conn.commit()
-        conn.close() 
-                   
-    def loadTrainData2(self,algorithm,):
-        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
-
-        cur = conn.cursor()
-        descsPos=[]
-        descsNeg=[]
-        Vocab=[]
-        
-       # if localizer!=LOCALIZER_WINDOW:
-		#Load Positive descriptors
-        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=1" ,(self.id , algorithm.id))
-        for r in cur:
-            descsPos.append(r[0])
-        
-        #Load Negative descriptors
-        cur.execute("SELECT descriptor  from trainingData t join category c on t.category=c.id where c.id = ? and algorithm=? and positive=0" ,(self.id , algorithm.id))
-        for r in cur:
-            descsNeg.append(r[0])
-          
-        ##Load BOW Vocabulary
-        cur.execute("SELECT descriptor from vocabData t join category c on t.category=c.id where c.id = ? and algorithm=?" ,(self.id , algorithm.id))
-        for r in cur:
-            desc=np.array(r[0])
-            Vocab.append(desc)
-
-        conn.close()
-        return descsPos,descsNeg,np.asarray(Vocab,dtype=np.float32)
-
-    def match_features_with_reduced_pos(self,des1,algorithm,Accuracy = 0.75):#BOW
-        des2=self.reduced_training_data_pos
-        if des2 != []:
-            if des1 is None:
-                return []
-            
-            good = []
-            flann = algorithm.matcher
-            if len(des1)>0 and len(des2)>0:
-                matches = flann.knnMatch(des1,np.asarray(des2,np.float32),k=2)
-                for m,n in matches:
-                    if m.distance < Accuracy * n.distance:
-                        good.append(m)
-        
-            return good                    
-        else:
-            return []
-
-    def get_detection_stats(self,TT,CC):
-        bandwidth=self.bandwidth
-        tpos =0
-        fpos =0
-        fneg=len(TT)
-        fecho=0
-        matched=np.array(np.zeros(len(TT)))
-        if len(CC)>0:
-            for cc in CC:
-                i,d = find_nearest_position(cc,TT)
-                if d < bandwidth:
-                    #print ('Point ', cc, ' --> Nearest Point : ', TT[i], ' @ Distance : ', d)
-                    matched[i]+=1
-                    if matched[i]==1:
-                        tpos+=1
-                        fneg-=1
-                    else:
-                        fecho+=1
-                else:
-                    #print ('Point ', cc, ' --> No Match, Min distance found : ', d)
-                    fpos+=1
-         
-            precision = (tpos/(tpos+fpos))
-            recall = tpos/(tpos+fneg) 
-        else:
-            precision,recall=0,0
-
-        return [precision,recall,tpos,fpos,fneg,fecho]
-
-    def get_detection_stats2(self,TT,CC):
-        bandwidth=self.bandwidth
-        tpos =0
-        fpos =0
-        fneg=len(TT)
-        fecho=0
-        matched=np.array(np.zeros(len(TT)))
-        if len(CC)>0:
-            for cc in CC:
-                i,d = find_nearest_position2(cc,TT)
-                if d < bandwidth:
-                    #print ('Point ', cc, ' --> Nearest Point : ', TT[i], ' @ Distance : ', d)
-                    matched[i]+=1
-                    if matched[i]==1:
-                        tpos+=1
-                        fneg-=1
-                    else:
-                        fecho+=1
-                else:
-                    #print ('Point ', cc, ' --> No Match, Min distance found : ', d)
-                    fpos+=1
-         
-            precision = (tpos/(tpos+fpos))
-            recall = tpos/(tpos+fneg) 
-        else:
-            precision,recall=0,0
-
-        return [precision,recall,tpos,fpos,fneg,fecho]
-
 def cluster_features_meanshift(kp,good,src_pts,bandwidth=0):
     if len(src_pts)>0:
         if bandwidth==0:
@@ -1360,7 +1447,7 @@ def cluster_features_dbscan(kp,good,src_pts,eps_=.2,min_samples_=1,bandwidth=50)
     from sklearn.preprocessing import StandardScaler
     # Compute DBSCAN
     if len(src_pts) == 0:
-        return [],[],None
+        return [],[]
     g = StandardScaler().fit_transform(src_pts)
     dbscan = DBSCAN(eps=eps_, min_samples=min_samples_).fit(g)
     core_samples_mask = np.zeros_like(dbscan.labels_, dtype=bool)
@@ -1387,12 +1474,15 @@ def cluster_features_dbscan(kp,good,src_pts,eps_=.2,min_samples_=1,bandwidth=50)
     return np.array(cluster_centers),labels
 
 
-def loadCategories(conn):
+def loadCategories_pickle(algorithm):
+    conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+
     cats=[]
     cur = conn.cursor()
-    cur.execute("select id,name,bandwidth from category ")
+    cur.execute("select pickle from category_pickle p where p.algorithm=? and p.enabled=1 order by category",(algorithm.id,))
+
     for r in cur:
-        c=Category(r[0],r[1],r[2])
+        c=r[0]
         cats.append(c)
     return cats
 
@@ -1407,3 +1497,447 @@ def loadCategories(train=1):
         c=Category(r[0],r[1],r[2],r[3],r[4],train=train)
         cats.append(c)
     return cats
+
+def load_categories_from_file(path):
+    return [load_category_from_file('airplane',path),
+            load_category_from_file('airport',path),
+            load_category_from_file('car',path)]
+
+
+def load_category_from_file(category_name,path):
+    filename=category_name + '.dat'
+    file=open(os.path.join(path,filename),'rb')
+    category=pickle.load(file)
+    file.close()
+    return category
+
+
+def save_category_to_file(category,outdir):
+    filename=category.name + '.dat'
+    file=open(os.path.join(outdir,filename),'wb')
+    c=copy.deepcopy(category)
+    for s in c.samplesPos:
+        if len(s.kps)>0:
+            s.kps[0][:]=[]
+    for s in c.samplesNeg:
+        if len(s.kps)>0:
+            s.kps[0][:]=[]
+    pickle.dump(c,file)
+    c=None
+    file.close()
+
+    
+def save_all_categories(categories,outdir):
+    
+    for category in categories:
+        save_category_to_file(category,outdir)
+
+
+def beeb():
+    import winsound
+    Freq = 2500 # Set Frequency To 2500 Hertz
+    Dur = 300 # Set Duration To 1000 ms == 1 second
+    winsound.Beep(Freq,Dur)
+
+def save_data():
+    import pickle
+    file=open(os.path.join(out_dir,'y_test.dat'),'wb')
+    pickle.dump(c_y_tests,file)
+    file.close()
+    file=open(os.path.join(out_dir,'y_score.dat'),'wb')
+    pickle.dump(c_y_scores,file)
+    file.close()    
+    lib2.save_all_categories(categories,out_dir)       
+
+
+def test(categories,algorithm):
+    startTime=datetime.now()
+    op_id='{0}_PCA{1}_BOW{2}_ALLData_Color_Hard_localizer{5}_skCluster_reduced{3}_{4}_accuracy_{6}'
+    op_id=op_id.format(algorithm.detector_name,algorithm.n,algorithm.k,reduced,startTime.strftime('%Y%m%d_%H%M%S'),localizer,accuracy)  
+    out_dir_test=os.path.join(out_dir,op_id)
+    os.makedirs(out_dir_test, exist_ok=True)
+    log_file = open(os.path.join(out_dir_test , 'output.log'), 'w')
+    
+    notes=''
+    notes+= 'Testing with detector='+ algorithm.detector_name 
+    notes+= ', gray=' + str(gray) + ', vocab=' + str(algorithm.k) 
+    notes+= ', pca with n=' + str(algorithm.n) 
+    notes+=', localizer = ' + str(localizer) 
+    if localizer==0:
+        notes+= ', window scanning, window_size_factor=' + str(window_size_factor) 
+        notes+=',window_overlapping_factor=' + str(window_overlapping_factor) 
+    if reduced >0:
+        notes+=' Data reduced with k=' + str(reduced)
+
+    log(notes,log_file)
+
+    c_y_tests=[] 
+    c_y_scores=[]
+    c_results=[]
+    times=[]
+    
+    for category in categories:
+        Trainingdir_out = os.path.join(out_dir_test , 'Training_out',category.name)
+        Testingdir_out = os.path.join(out_dir_test , 'Testing_out',category.name)
+        os.makedirs(Trainingdir_out, exist_ok=True)
+        os.makedirs(Testingdir_out, exist_ok=True)
+        testpath=category.cat_testdata_path
+        gtpath=os.path.join(testpath,'gt')
+        i=0
+        filenames=[]
+        filepaths=[]
+        gtfilepaths=[]
+        y_tests=[]
+        y_scores=[]
+        results=[0,0,0,0,0,0]
+        if not os.path.exists(testpath):
+            continue
+        for testfile in os.listdir(testpath):    #ARG1
+            testFile_path=os.path.join(testpath, testfile)
+            if os.path.isfile(testFile_path):
+                filename,extension = testfile.rsplit('.',1)
+                if (extension=="tif" or extension=="jpg" or extension=="bmp" or extension=="png"):
+                    filenames.append(filename)
+                    filepaths.append(testFile_path)
+                    gtfile=os.path.join(gtpath,filename) + '.txt'
+                    gtfilepaths.append(gtfile)
+        
+        for filename,testFile_path,gtfile in zip(filenames,filepaths,gtfilepaths):
+            t=datetime.now()
+            goodMatchs=[]
+            good_kps=[]                        
+
+            cluster_labels=[]
+            i+=1
+
+            log('Start Testing tile ' + str(i) + '/' + str(len(filenames)) + ' : ' + testFile_path,log_file)
+            img=cv2.imread(testFile_path,cv2.IMREAD_GRAYSCALE if gray else cv2.IMREAD_COLOR)
+
+            band=category.bandwidth*window_size_factor  #WIndows size r
+            o=band*window_overlapping_factor    #Windows overlapping                         
+            step=band-o
+            
+
+            #########################################################################
+            ##########################Localize test points###########################
+            #########################################################################
+            if localizer==LOCALIZER_WINDOW:
+                if gray:
+                    rows,cols=img.shape
+                else:
+                    rows,cols,ch=img.shape
+                
+                log("Using Window(" + str(band) + "," + str(o) + ") Scan to Localize Targets...")
+                
+                log("Using Window(" + str(band) + "," + str(o) + ") Scan to Localize Targets...",log_file)
+
+                cluster_centers=np.array([np.array([i,j]) for j in range(int(band/2),rows,int(step))
+                                 for i in range(int(band/2),cols,int(step))])
+            else:
+                test_kps=algorithm.get_kps(img)
+                if reduced > 0:
+                    if (len(category.reduced_training_data_pos)!=reduced and len(category.reduced_training_data_pos)!=int(reduced*len(category.training_data_pos))):
+                        category.reduced_training_data_pos=category.clusterTrainData(category.training_data_pos,reduced)                
+                    goodMatchs=category.match_features(test_kps[1],category.reduced_training_data_pos,algorithm,accuracy)
+                else:
+                    goodMatchs=category.match_features(test_kps[1],category.training_data_pos,algorithm,accuracy)
+
+                log('good matches = '+ str(len(goodMatchs)),log_file)
+                
+                plot_features2(img,test_kps[0],graph,
+                                 os.path.join(Testingdir_out,'detected_features_'+ filename + '.png'),'Detcted features in image')
+
+
+                for g in goodMatchs:
+                    good_kps.append(np.float32(test_kps[0][g.queryIdx].pt)) #to be used in clustering 
+                good_kps=np.asarray(good_kps)
+                
+
+                    
+                if localizer==LOCALIZER_DBSCAN:
+                    log("Using DBScan to Localize Targets...")
+                    cluster_centers,cluster_labels=cluster_features_dbscan(test_kps,goodMatchs,good_kps,bandwidth=category.bandwidth,eps_=epsilon,min_samples_=min_pts_per_cluster)
+                elif localizer==LOCALIZER_MEANSHIFT:
+                    log("Using Mean Shift to Localize Targets...")
+                    cluster_centers,cluster_labels=cluster_features_meanshift(test_kps,goodMatchs,good_kps,category.bandwidth/2)
+
+                plot_features_and_cluster_centers(img,cluster_centers,None,cluster_labels,good_kps, graph,
+                                        os.path.join(Testingdir_out,'good_features_clustered_'+ filename + '.png'),'Good features clustered in image')
+            #########################################################################
+            #########################Test Candidate Objects##########################
+            #########################################################################
+            cc_f=[]
+            SVMTestLabel=[]
+
+            TT=load_truth_table2(gtfile)
+            matched=np.array(np.zeros(len(TT)))
+
+            plot_features_and_cluster_centers(img,TT,None,[],[], graph,
+                                        os.path.join(Testingdir_out,'TT_'+ filename + '.png'),'Ground Truth')
+
+            algorithm.bowextractor.setVocabulary(category.vocab)
+
+            ###########Build Test data ground truth################                        
+            for c in cluster_centers:
+                a,d = find_nearest_position3(c,TT,matched)
+                if d < band:
+                    SVMTestLabel.extend([1])
+                    matched[a]=1
+                else:
+                    SVMTestLabel.extend([0])
+            ##########Add non matched positions#################
+            #if np.sum(matched)<len(matched):
+            #    cluster_centers2=[]
+            #    for ti,mm in zip(TT,matched):
+            #        if mm==0:
+            #            cluster_centers2.append(ti)
+            #            SVMTestLabel.extend([1])
+            #    if len(cluster_centers)>0 :
+            #        cluster_centers=np.concatenate((cluster_centers,np.array(cluster_centers2)),axis=0)
+            #    else:
+            #        cluster_centers=np.array(cluster_centers2)
+
+            ############Build Test Data################   
+            SVMTestData=[]
+            for c in cluster_centers:
+                b2=int(band/2)
+                patch=img[(c[1]-b2 if c[1]>b2 else 0):c[1]+b2,c[0]-b2 if c[0]>b2 else 0:c[0]+b2]     #TODO may need enlargement
+
+                #patch_kps=algorithm.detector.detect(patch)
+                patch_kps,patch_descs=algorithm.descriptor.detectAndCompute(patch,None)
+                #plot_features2(patch,patch_kps,0)
+
+                hist=algorithm.bowextractor.compute(patch,patch_kps,patch_descs)
+                patch=None                  
+                if hist is None:
+                    hist=np.zeros(len(category.vocab), dtype=np.float32)
+                    hist=hist.reshape(1,len(category.vocab))
+
+                SVMTestData.extend(hist)
+
+            X_test=np.array(SVMTestData)
+            y_test=np.array(SVMTestLabel)     
+            ##########################
+            if X_test.shape[0]==0:
+                X_test=np.zeros(len(category.vocab)).astype(np.float32)
+                X_test=X_test.reshape(1,len(category.vocab))
+                y_test=[0]
+            if algorithm.n>0:
+                X_test=category.PCA.transform(X_test)
+            ##########################
+
+            score=category.SVM.score(X_test,y_test)
+            df=category.SVM.decision_function(X_test)
+            
+           
+            if df.shape[0]>1:
+                fpr, tpr, thresholds = roc_curve(y_test, df)
+                roc_auc = auc(fpr, tpr)
+
+                log('Score = ' + str(score),log_file)
+                log('AUC = ' + str(roc_auc),log_file)
+
+
+                precision, recall, _ = precision_recall_curve(y_test,df)
+                average_precision = average_precision_score(y_test, df)
+
+                log('average precision = ' + str(average_precision),log_file)
+
+                y_tests.extend(y_test)
+                y_scores.extend(df)
+
+                if graph:
+                    plt.plot(fpr, tpr, lw=1, label='ROC  (area = %0.2f)' % (roc_auc,))
+                    plt.plot([0, 1], [0, 1], '--', color=(0.6, 0.6, 0.6), label='Luck')
+                    plt.xlim([-0.05, 1.05])
+                    plt.ylim([-0.05, 1.05])
+                    plt.xlabel('False Positive Rate')
+                    plt.ylabel('True Positive Rate')
+                    plt.title('Receiver operating characteristic')
+                    plt.legend(loc="upper right")
+                    plt.savefig(os.path.join(Testingdir_out,filename + '_roc.png'),bbox_inches='tight')
+                    if graph>1:
+                        plt.show()
+                    else:
+                        plt.close()
+
+
+                if graph:
+                    plt.clf()
+                    plt.plot(recall, precision, label='Precision-Recall curve')
+                    plt.xlabel('Recall')
+                    plt.ylabel('Precision')
+                    plt.ylim([0.0, 1.05])
+                    plt.xlim([0.0, 1.0])
+                    plt.title('Precision-Recall example: AUC={0:0.2f}'.format(average_precision))
+                    plt.legend(loc="upper right")
+                    plt.savefig(os.path.join(Testingdir_out,filename + '_pr.png'),bbox_inches='tight')
+                    if graph>1:
+                        plt.show()
+                    else:
+                        plt.close()
+
+
+            cc_f=category.SVM.predict(X_test)
+
+            detected_targets_for_file = pixelToLatLon(testFile_path,cluster_centers,cc_f)        
+            results_for_file=category.get_detection_stats2(TT,detected_targets_for_file)
+            results = [results[i] + results_for_file[i] for i in range(6)]
+            
+            log('Precision : '+ str(results_for_file[0]),log_file)
+            log('recall : '+ str(results_for_file[1]),log_file)
+            log('True Positives: '+ str(results_for_file[2]),log_file)
+            log('False Positives: '+ str(results_for_file[3]),log_file)
+            log('False Negatives:'+ str(results_for_file[4]),log_file)
+            log('False Echo:'+ str(results_for_file[5]),log_file)
+ 
+            log('Detected Objects all:  ' + str(len(cluster_centers)),log_file)
+            log('Filtered Detected Objects:  ' + str(np.sum(cc_f)),log_file)
+            log('True Objects:  ' + str(len(TT)),log_file)
+
+            #Create images of results and save it(graph -> 0: No Graphs, 1: create and save but no show, 2: create and save and show)
+            if graph:
+                plot_features_and_cluster_centers(img,cluster_centers,cc_f,cluster_labels,good_kps, graph,
+                                                    os.path.join(Testingdir_out,filename + '_filtered_objects.png'),'Detected classifier objects')
+            img=None
+            times.append(datetime.now()-t)
+        #####Total PR per Category##############
+        if y_tests !=[]:
+            y_tests=np.array(y_tests)
+            y_scores=np.array(y_scores)
+
+            fpr, tpr, thresholds = roc_curve(y_tests.ravel(), y_scores.ravel())
+            roc_auc = auc(fpr, tpr) 
+            if graph:
+                plt.plot(fpr, tpr, lw=1, label=category.name + ' ROC  (area = %0.2f)' % (roc_auc,))
+                plt.plot([0, 1], [0, 1], '--', color=(0.6, 0.6, 0.6), label='Luck')
+                plt.xlim([-0.05, 1.05])
+                plt.ylim([-0.05, 1.05])
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title(category.name + ' Receiver operating characteristic')
+                plt.legend(loc="upper right")
+                plt.savefig(os.path.join(Testingdir_out,category.name + '_roc.png'),bbox_inches='tight')
+                if graph>1:
+                    plt.show()
+                else:
+                    plt.close()
+
+
+            precision, recall, _ = precision_recall_curve(y_tests.ravel(), y_scores.ravel())
+            average_precision = average_precision_score(y_tests, y_scores, average="micro")
+            if graph:
+                plt.clf()
+                plt.plot(recall, precision, label=category.name + ' Precision-Recall curve')
+                plt.xlabel('Recall')
+                plt.ylabel('Precision')
+                plt.ylim([0.0, 1.05])
+                plt.xlim([0.0, 1.0])
+                plt.title(category.name + ' Precision-Recall example: AUC={0:0.2f}'.format(average_precision))
+                plt.legend(loc="upper right")
+                plt.savefig(os.path.join(Testingdir_out,category.name + '_pr.png'),bbox_inches='tight')
+                if graph>1:
+                    plt.show()
+                else:
+                    plt.close()
+
+        file=open(os.path.join(out_dir_test,category.name + '_y_test.dat'),'wb')
+        pickle.dump(y_tests,file)
+        file.close()
+        file=open(os.path.join(out_dir_test,category.name + '_y_scores.dat'),'wb')
+        pickle.dump(y_scores,file)
+        file.close()
+        
+        c_y_tests.extend(y_tests)
+        c_y_scores.extend(y_scores)            
+
+        if results[2]+results[3] > 0 :
+            results[0] = (results[2]/(results[2]+results[3]))
+        else:
+            results[0] = 0
+        results[1] = results[2]/(results[2]+results[4])         
+        c_results.append(results)
+        
+        log(category.name + ' Precision : '+ str(results[0]),log_file)
+        log(category.name + ' recall : '+ str(results[1]),log_file)
+        log(category.name + ' True Positives: '+ str(results[2]),log_file)
+        log(category.name + ' False Positives: '+ str(results[3]),log_file)
+        log(category.name + ' False Negatives:'+ str(results[4]),log_file)
+        log(category.name + ' False Echo:'+ str(results[5]),log_file)
+
+        endTime=datetime.now()
+
+    
+        conn = sqlite3.connect(db_filepath, detect_types=sqlite3.PARSE_DECLTYPES)
+        cur = conn.cursor()
+        startTime_=startTime.strftime('%Y%m%d_%H%M%S.%f')
+        endTime_=endTime.strftime('%Y%m%d_%H%M%S.%f')
+        timedelta=(endTime-startTime).total_seconds()
+
+        sql='insert into OPS_OUT '
+        sql+='(start_time,end_time,epsilon,min_pts_per_cluster,accuracy,precision,recall,time,tpos,fpos,fneg,echo,algorithm,bandwidth,notes,category,localizer,wsf,wof,reduced_k,y_test,y_score,op_id_txt,soft_encoding) '
+        sql+='values ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        cur.execute(sql,(startTime_,endTime_,epsilon,min_pts_per_cluster,
+                         accuracy,results[0],results[1],timedelta,results[2],
+                         results[3],results[4],results[5],algorithm.id,
+                         category.bandwidth,notes,category.id,
+                         localizer,window_size_factor,window_overlapping_factor,reduced,
+                         pickle.dumps(y_tests),pickle.dumps(y_scores),op_id,SoftCoding))
+        conn.commit()
+    ##############################End of category loop#########################################
+    if c_y_tests!=[]:
+        c_y_tests=np.array(c_y_tests)
+        c_y_scores=np.array(c_y_scores)
+        fpr, tpr, thresholds = roc_curve(c_y_tests.ravel(), c_y_scores.ravel())
+        roc_auc = auc(fpr, tpr) 
+        log('Total All ROC AUC=' + str(roc_auc),log_file)        
+
+        if graph:
+            plt.plot(fpr, tpr, lw=1, label='All ROC  (area = %0.2f)' % (roc_auc,))
+            plt.plot([0, 1], [0, 1], '--', color=(0.6, 0.6, 0.6), label='Luck')
+            plt.xlim([-0.05, 1.05])
+            plt.ylim([-0.05, 1.05])
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title('All Receiver operating characteristic')
+            plt.legend(loc="upper right")
+            plt.savefig(os.path.join(out_dir_test,'All_roc.png'),bbox_inches='tight')
+            if graph>1:
+                plt.show()
+            else:
+                plt.close()
+
+        precision, recall, _ = precision_recall_curve(c_y_tests.ravel(), c_y_scores.ravel())
+        average_precision = average_precision_score(c_y_tests, c_y_scores, average="micro")
+
+        log('Total All AP=' + str(average_precision),log_file)        
+
+        if graph:
+            plt.clf()
+            plt.plot(recall, precision, label='All Precision-Recall curve')
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.ylim([0.0, 1.05])
+            plt.xlim([0.0, 1.0])
+            plt.title('All Precision-Recall example: AUC={0:0.2f}'.format(average_precision))
+            plt.legend(loc="upper right")
+            plt.savefig(os.path.join(out_dir_test,'All_pr.png'),bbox_inches='tight')
+            if graph>1:
+                plt.show()
+            else:
+                plt.close()
+
+
+    file=open(os.path.join(out_dir_test,'y_test.dat'),'wb')
+    pickle.dump(c_y_tests,file)
+    file.close()
+    file=open(os.path.join(out_dir_test,'y_score.dat'),'wb')
+    pickle.dump(c_y_scores,file)
+    file.close()    
+    
+
+
+    beeb()
+    log('Finished succefully',log_file)
+#     return times
+    log_file.close()
