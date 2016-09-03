@@ -22,9 +22,15 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="classification.py" />
+    <Compile Include="encoding.py" />
+    <Compile Include="feature.py" />
+    <Compile Include="fisher_super_vector.py" />
     <Compile Include="graph.py" />
     <Compile Include="master.py" />
     <Compile Include="mylibrary.py" />
+    <Compile Include="pooling.py" />
+    <Compile Include="visualDictionary.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="db.sql" />
