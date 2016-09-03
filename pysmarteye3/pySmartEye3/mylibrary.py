@@ -47,7 +47,7 @@ def initialize_parameteres(data_root_='.\\Data\\',dbname="train.db"):
     global LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer,gray
     global epsilon,min_pts_per_cluster,accuracy,retrain,graph
     global window_overlapping_factor,window_size_factor
-    global reduced,SoftCoding
+    global reduced,encoding
 
 # Display progress logs on stdout
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -771,23 +771,6 @@ class Algorithm:
         self.k=k
         self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
         self.n=n
-
-    def search(self,category):
-        import ObjFind as o
-        notes='Testing with vocab=' + str(self.k) + ', no pca, window scanning, window_size_factor=1,window_overlapping_factor=.2' 
-        op = o.objfind(algorithm=self,
-                       category=category,
-                       accuracy_=.8,
-                       graph=1,
-                       geo=0,
-                       testpath=category.cat_testdata_path,
-                       notes=notes,
-                       epsilon_=.15,
-                       localizer=m.LOCALIZER_WINDOW,
-                       window_size_factor=1,
-                       window_overlapping_factor=.2)
-        op.run_bow()
-
 
     #def get_algorithm(self):
     #    sift=cv2.xfeatures2d.SIFT_create()
@@ -1882,7 +1865,7 @@ def test(categories,algorithm):
                          results[3],results[4],results[5],algorithm.id,
                          category.bandwidth,notes,category.id,
                          localizer,window_size_factor,window_overlapping_factor,reduced,
-                         pickle.dumps(y_tests),pickle.dumps(y_scores),op_id,SoftCoding))
+                         pickle.dumps(y_tests),pickle.dumps(y_scores),op_id,encoding))
         conn.commit()
     ##############################End of category loop#########################################
     if c_y_tests!=[]:

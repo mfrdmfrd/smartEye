@@ -45,7 +45,6 @@ m.retrain=0       #2:rebuild classifier, 1:rebuild vocabulary, 0:Don't rebuild
 m.gray=0
 
 
-
 # In[5]:
 
 sift=m.Algorithm('SIFT',k=k,n=n)
@@ -81,7 +80,7 @@ categories=cat_sift
 
 m.graph=0
 
-m.SoftCoding=0
+m.encoding=0
 m.localizer=1
 m.window_size_factor=1
 m.window_overlapping_factor=0
@@ -89,6 +88,7 @@ m.epsilon=0.05
 m.min_pts_per_cluster=1
 m.reduced=0.2
 m.accuracy=0.85
+m.encoding=0                #0: Hard, 1: Soft, 2: LLC
 
 #for accuracy in np.arange(0.80,1.01,0.01):
 #    m.accuracy=accuracy
