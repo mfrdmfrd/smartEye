@@ -1,23 +1,5 @@
 
-# coding: utf-8
-
-import os
 import mylibrary as m
-import pickle
-
-
-# In[2]:
-
-#importlib.reload(lib2)
-#importlib.reload(m)
-
-
-# In[3]:
-
-
-
-
-# In[4]:
 
 data_root='.\\Data\\'
 dbname="train.db"
@@ -29,22 +11,23 @@ m.retrain=0       #2:rebuild classifier, 1:rebuild vocabulary, 0:Don't rebuild
 m.gray=0
 m.bow_encoding=0                #0: Hard, 1: Soft, 2: LLC
 saveCategories=0
+load_from_files=0
 
-# In[5]:
 
 sift=m.Algorithm('SIFT',k=k,n=n)
 surf=m.Algorithm('SURF',k=k,n=n)
 
 
-# In[5]:
 if m.retrain==0:
-    ##################Load pickle db###################
-    #cat_sift=m.loadCategories_pickle(sift)
-    #cat_surf=m.loadCategories_pickle(surf)
-    ##################Load pickle file#################
-    #cat_surf=m.load_categories_from_file('.//images//surf')
-    cat_sift=m.load_categories_from_file('.//images//sift')
-    #cat_sift[0]=m.load_category_from_file('airplane','.//images//sift')
+    if load_from_files:
+        ##################Load pickle file#################
+        cat_sift=m.load_categories_from_file('.//images//sift')
+        cat_surf=m.load_categories_from_file('.//images//surf')
+        #cat_sift[0]=m.load_category_from_file('airplane','.//images//sift')
+    else:
+        ##################Load pickle db###################
+        cat_sift=m.loadCategories_pickle(sift)
+        cat_surf=m.loadCategories_pickle(surf)
 elif m.retrain==1:
     ###################Train##################################
     cat_sift=m.loadCategories(m.retrain)
@@ -54,32 +37,38 @@ elif m.retrain==1:
            c.train_classifier(algorithm)
 elif m.retrain==2:
     #################Rebuild classifier########################
-    #for ,cats in zip([sift,surf],[cat_sift,cat_surf]):
-    for c in cat_sift:
-        c.X_train=[]
-        c.train_classifier(algorithm)
+    for algorithm,cats in zip([sift,surf],[cat_sift,cat_surf]):
+        for c in cat_sift:
+            c.X_train=[]
+            c.train_classifier(algorithm)
 #categories_s=[cat_sift,cat_surf]
 
-
-# In[10]:
 
 times=[]
 algorithm=sift
 categories=cat_sift
 
-m.graph=0
+m.graph=1
 
-m.localizer=1
+m.localizer=0
+
 m.window_size_factor=1
 m.window_overlapping_factor=0
+
+m.accuracy=0.85
 m.epsilon=0.05
 m.min_pts_per_cluster=1
 m.reduced=0.2
-m.accuracy=0.85
 
-#for accuracy in np.arange(0.80,1.01,0.01):
-#    m.accuracy=accuracy
-m.test(categories,algorithm)
+
+
+for i in range(4):
+    m.bow_encoding=i
+    algorithm=m.Algorithm('SIFT',k=k,n=n)
+    for category in categories:
+        category.X_train=[]
+        category.train_classifier(algorithm)
+    m.test(categories,algorithm)
 
 
 
@@ -98,7 +87,8 @@ if saveCategories:
     #for algorithm,cats in zip([sift,surf],[cat_sift,cat_surf]):
     #    for c in cats:
     #        c.saveTrainData2(algorithm)
-
+    for c in cat_sift:
+        c.saveTrainData2(algorithm)
 
 
 

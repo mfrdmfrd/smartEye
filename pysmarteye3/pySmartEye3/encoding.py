@@ -21,7 +21,7 @@ class HardHistogramEncoder:
         featureCodes = np.zeros((n_samples, n_visual_words))
         featureCodes[range(n_samples), D.argmin(axis=1)] = 1
         hist_ini=np.sum(featureCodes,axis=0)
-        hist=normalize(hist_ini)
+        hist=normalize(hist_ini.reshape(1,-1))
 
         return hist
 
@@ -42,7 +42,7 @@ class SoftHistogramEncoder:
         D = np.repeat(features_features, n_visual_words, axis=1) - 2 * features.dot(visualWords.T) + np.repeat(visualWords_visualWords, n_samples, axis=0)
         featureCodes = np.exp(-0.5*self.sigma*D)
         hist_ini=np.sum(featureCodes,axis=0)
-        hist=normalize(hist_ini)
+        hist=normalize(hist_ini.reshape(1,-1))
         return hist
 
 class LLCEncoder:
@@ -84,7 +84,7 @@ class LLCEncoder:
                 print ('Error')
             
         hist_ini=np.sum(featureCodes,axis=0)
-        hist=normalize(hist_ini)
+        hist=normalize(hist_ini.reshape(1,-1))
         return hist
 
 if __name__ == '__main__':

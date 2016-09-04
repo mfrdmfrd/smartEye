@@ -3,3 +3,8 @@
 ################################################################################
 
 /pysmarteye3/pySmartEye3/Data
+/pysmarteye3/pySmartEye3/images
+/pysmarteye3/pySmartEye3/ipy
+/pysmarteye3/pySmartEye3/lib
+/pysmarteye3/pySmartEye3/test
+/pysmarteye3/pySmartEye3/__pycache__

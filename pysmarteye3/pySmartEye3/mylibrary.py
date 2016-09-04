@@ -767,12 +767,23 @@ class Algorithm:
         self.k=k
         #self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
         self.n=n
-        if bow_encoding == 0:
-            self.bowextractor = encoding.HardHistogramEncoder()
-        elif bow_encoding == 1:
+        if bow_encoding == 1:
             self.bowextractor = encoding.SoftHistogramEncoder()
         elif bow_encoding == 2:
+            self.bowextractor = encoding.HardHistogramEncoder()
+        elif bow_encoding == 3:
             self.bowextractor = encoding.LLCEncoder()
+        elif bow_encoding == 0:
+            self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
+
+    def get_hist(self,img,kps,descs,vocab):
+        if bow_encoding == 0:
+            self.bowextractor.setVocabulary(vocab)
+            hist=self.bowextractor.compute(img,kps,descs)
+        else:
+            hist=self.bowextractor.compute(descs,vocab)
+
+        return hist
 
     #def get_algorithm(self):
     #    sift=cv2.xfeatures2d.SIFT_create()
@@ -1105,8 +1116,8 @@ class Category:
                 if s.kps==[]:
                     s.kps=algorithm.get_kps(img)
                 if s.kps[0] != None and s.kps[0] != []:
-                    #s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                    s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
+                    s.hist=algorithm.get_hist(img,s.kps[0],s.kps[1],self.vocab)
+                    #s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
                     self.SVMTrainLabel.extend([1])
                     self.SVMTrainData.extend(s.hist)
                 img=None
@@ -1119,8 +1130,8 @@ class Category:
                 if s.kps==[]:
                     s.kps=algorithm.get_kps(img)
                 if s.kps[0] != None and s.kps[0] != []:
-                    #s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                    s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
+                    s.hist=algorithm.get_hist(img,s.kps[0],s.kps[1],self.vocab)
+                    #s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
                     self.SVMTrainLabel.extend([0])
                     self.SVMTrainData.extend(np.array(s.hist))
                 img=None
@@ -1212,7 +1223,7 @@ class Category:
         cs = pickle.dumps(c)
         
         conn.execute("update category_pickle set enabled=0 where category=? and algorithm=?",(self.id,algorithm.id))
-        conn.execute("insert into category_pickle (category,algorithm,pickle) values(?,?,?)", (self.id,algorithm.id,cs))
+        conn.execute("insert into category_pickle (category,algorithm,pickle,pca,coding) values(?,?,?,?,?)", (self.id,algorithm.id,cs,algorithm.n,bow_encoding))
         conn.commit()
         conn.close()   
         
@@ -1543,8 +1554,8 @@ def save_data():
 
 def test(categories,algorithm):
     startTime=datetime.now()
-    op_id='{0}_PCA{1}_BOW{2}_ALLData_Color_Hard_localizer{5}_skCluster_reduced{3}_{4}_accuracy_{6}'
-    op_id=op_id.format(algorithm.detector_name,algorithm.n,algorithm.k,reduced,startTime.strftime('%Y%m%d_%H%M%S'),localizer,accuracy)  
+    op_id='{0}_PCA{1}_BOW{2}_ALLData_Color_Hard_localizer{5}_skCluster_reduced{3}_{4}_accuracy_{6}_coding_{7}'
+    op_id=op_id.format(algorithm.detector_name,algorithm.n,algorithm.k,reduced,startTime.strftime('%Y%m%d_%H%M%S'),localizer,accuracy,bow_encoding)  
     out_dir_test=os.path.join(out_dir,op_id)
     os.makedirs(out_dir_test, exist_ok=True)
     log_file = open(os.path.join(out_dir_test , 'output.log'), 'w')
@@ -1557,6 +1568,7 @@ def test(categories,algorithm):
     if localizer==0:
         notes+= ', window scanning, window_size_factor=' + str(window_size_factor) 
         notes+=',window_overlapping_factor=' + str(window_overlapping_factor) 
+    notes+=' \n, Usin Coding: ' +  str(bow_encoding)
     if reduced >0:
         notes+=' Data reduced with k=' + str(reduced)
 
@@ -1697,8 +1709,11 @@ def test(categories,algorithm):
                 #patch_kps=algorithm.detector.detect(patch)
                 patch_kps,patch_descs=algorithm.descriptor.detectAndCompute(patch,None)
                 #plot_features2(patch,patch_kps,0)
-
-                hist=algorithm.bowextractor.compute(patch_descs,category.vocab)
+                if patch_descs is not None:
+                    hist=algorithm.get_hist(patch,patch_kps,patch_descs,category.vocab)
+                else:
+                    hist=np.zeros(len(category.vocab), dtype=np.float32)
+                    hist=hist.reshape(1,len(category.vocab))
                 patch=None                  
                 if hist is None:
                     hist=np.zeros(len(category.vocab), dtype=np.float32)
