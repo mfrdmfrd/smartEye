@@ -21,13 +21,9 @@ from datetime import timedelta
 from sklearn.metrics import roc_curve, auc
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
-#import matplotlib.cm as cm
-#import pickle
-#import re
-#import sys
-#from PyQt4 import QtGui
-#import gdal,ogr,osr
-#import db
+
+import encoding
+
 
 global data_root,Trainingdir_in,Testingdir_in,log_file,out_dir,db_filepath, LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer,gray
 
@@ -47,7 +43,7 @@ def initialize_parameteres(data_root_='.\\Data\\',dbname="train.db"):
     global LOCALIZER_WINDOW,LOCALIZER_MEANSHIFT,LOCALIZER_DBSCAN,localizer,gray
     global epsilon,min_pts_per_cluster,accuracy,retrain,graph
     global window_overlapping_factor,window_size_factor
-    global reduced,encoding
+    global reduced,bow_encoding
 
 # Display progress logs on stdout
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -769,8 +765,14 @@ class Algorithm:
                 self.descriptor=self.detector
                 self.des_name=self.detector_name
         self.k=k
-        self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
+        #self.bowextractor = cv2.BOWImgDescriptorExtractor(self.descriptor,self.matcher)
         self.n=n
+        if bow_encoding == 0:
+            self.bowextractor = encoding.HardHistogramEncoder()
+        elif bow_encoding == 1:
+            self.bowextractor = encoding.SoftHistogramEncoder()
+        elif bow_encoding == 2:
+            self.bowextractor = encoding.LLCEncoder()
 
     #def get_algorithm(self):
     #    sift=cv2.xfeatures2d.SIFT_create()
@@ -1071,7 +1073,7 @@ class Category:
         #self.vocab=bowTrainer.cluster(np.array(self.training_data_all))
         
 
-        algorithm.bowextractor.setVocabulary(self.vocab)
+        #algorithm.bowextractor.setVocabulary(self.vocab)
     ###################################################               
         #log('Saving Vocabulary')
         #self.saveTrainData(algorithm)
@@ -1080,62 +1082,68 @@ class Category:
         #if self.SVM is None or query_yes_no('SVM found, Construct Again?','no'):
         log('Building Histogram')
         #Build Histograms
-        self.SVMTrainLabel=[]
-        self.SVMTrainData=[]
         
-        if len(self.samplesPos) == 0:
-            self.load_samples()
+        if self.SVMTrainData==[]:#delete SVMTrainData to force regenerate histograms
+            self.SVMTrainLabel=[]
+            self.SVMTrainData=[]
+        
+            if len(self.samplesPos) == 0:
+                self.load_samples()
             
-        sp_count=len(self.samplesPos)
-        sn_count=len(self.samplesNeg)
+            sp_count=len(self.samplesPos)
+            sn_count=len(self.samplesNeg)
         
-        if len(self.vocab)==0:
-            self.build_vocab(algorithm)
+            if len(self.vocab)==0:
+                self.build_vocab(algorithm)
 
-        algorithm.bowextractor.setVocabulary(self.vocab)
-        i=1
-        for s in self.samplesPos:
-            log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
-            i+=1
-            img=s.get_img()
-            if s.kps==[]:
-                s.kps=algorithm.get_kps(img)
-            if s.kps[0] != None and s.kps[0] != []:
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                self.SVMTrainLabel.extend([1])
-                self.SVMTrainData.extend(s.hist)
-            img=None
-        i=1
-        b=self.bandwidth
-        for s in self.samplesNeg:
-            log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
-            i+=1
-            img=s.get_img()
-            if s.kps==[]:
-                s.kps=algorithm.get_kps(img)
-            if s.kps[0] != None and s.kps[0] != []:
-                s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
-                self.SVMTrainLabel.extend([0])
-                self.SVMTrainData.extend(np.array(s.hist))
-            img=None
-        self.X_train=np.array(self.SVMTrainData)
-        self.y_train=np.array(self.SVMTrainLabel)
+            #algorithm.bowextractor.setVocabulary(self.vocab)
+            i=1
+            for s in self.samplesPos:
+                log('Generate Pos Histogram of ' + str(i) +' of ' + str(sp_count) + ' : ' + s.file_name)
+                i+=1
+                img=s.get_img()
+                if s.kps==[]:
+                    s.kps=algorithm.get_kps(img)
+                if s.kps[0] != None and s.kps[0] != []:
+                    #s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                    s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
+                    self.SVMTrainLabel.extend([1])
+                    self.SVMTrainData.extend(s.hist)
+                img=None
+            i=1
+            b=self.bandwidth
+            for s in self.samplesNeg:
+                log('Generate Neg Histogram of ' + str(i) +' of ' + str(sn_count) + ' : ' + s.file_name)
+                i+=1
+                img=s.get_img()
+                if s.kps==[]:
+                    s.kps=algorithm.get_kps(img)
+                if s.kps[0] != None and s.kps[0] != []:
+                    #s.hist=algorithm.bowextractor.compute(img,s.kps[0],s.kps[1])
+                    s.hist=algorithm.bowextractor.compute(s.kps[1],self.vocab)
+                    self.SVMTrainLabel.extend([0])
+                    self.SVMTrainData.extend(np.array(s.hist))
+                img=None
+                    
+            self.y_train=np.array(self.SVMTrainLabel)
+            self.X_train=np.array(self.SVMTrainData)
         log('Histograms Calculated')
 
     def train_classifier(self,algorithm):        
         if self.SVMTrainData == []:
             self.build_training_hitsograms(algorithm)
             
-        log('Building PCA')
+        log('Building PCA...')
         self.X_train=np.array(self.SVMTrainData)
         self.y_train=np.array(self.SVMTrainLabel)        
         if algorithm.n>0:
             self.PCA=RandomizedPCA(algorithm.n, whiten=True).fit(self.X_train)
             self.X_train = self.PCA.transform(self.X_train)
             
-        log('Training Classifier')
+        log('Training Classifier...')
         self.SVM = svm.SVC(probability=True)
         self.SVM.fit(self.X_train,self.y_train)
+        log('Classifier Trained')
 
         self.saveSVM()
 ###################################################    
@@ -1658,7 +1666,7 @@ def test(categories,algorithm):
             plot_features_and_cluster_centers(img,TT,None,[],[], graph,
                                         os.path.join(Testingdir_out,'TT_'+ filename + '.png'),'Ground Truth')
 
-            algorithm.bowextractor.setVocabulary(category.vocab)
+            #algorithm.bowextractor.setVocabulary(category.vocab)
 
             ###########Build Test data ground truth################                        
             for c in cluster_centers:
@@ -1690,7 +1698,7 @@ def test(categories,algorithm):
                 patch_kps,patch_descs=algorithm.descriptor.detectAndCompute(patch,None)
                 #plot_features2(patch,patch_kps,0)
 
-                hist=algorithm.bowextractor.compute(patch,patch_kps,patch_descs)
+                hist=algorithm.bowextractor.compute(patch_descs,category.vocab)
                 patch=None                  
                 if hist is None:
                     hist=np.zeros(len(category.vocab), dtype=np.float32)
@@ -1865,7 +1873,7 @@ def test(categories,algorithm):
                          results[3],results[4],results[5],algorithm.id,
                          category.bandwidth,notes,category.id,
                          localizer,window_size_factor,window_overlapping_factor,reduced,
-                         pickle.dumps(y_tests),pickle.dumps(y_scores),op_id,encoding))
+                         pickle.dumps(y_tests),pickle.dumps(y_scores),op_id,bow_encoding))
         conn.commit()
     ##############################End of category loop#########################################
     if c_y_tests!=[]:
