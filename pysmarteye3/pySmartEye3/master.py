@@ -1,17 +1,20 @@
 
 import mylibrary as m
+import os
+
 
 data_root='.\\Data\\'
 dbname="train.db"
 m.initialize_parameteres(data_root_=data_root,dbname=dbname)
 
-k=1000
+k=2000
 n=256
-m.retrain=0       #2:rebuild classifier, 1:rebuild vocabulary, 0:Don't rebuild
 m.gray=0
-m.bow_encoding=0                #0: Hard, 1: Soft, 2: LLC
+m.bow_encoding=3                #0: Hard, 1: Soft, 2: LLC
+
+m.retrain=0      #2:rebuild classifier, 1:rebuild vocabulary, 0:Don't rebuild
 saveCategories=0
-load_from_files=0
+load_from_files=1
 
 
 sift=m.Algorithm('SIFT',k=k,n=n)
@@ -21,8 +24,8 @@ surf=m.Algorithm('SURF',k=k,n=n)
 if m.retrain==0:
     if load_from_files:
         ##################Load pickle file#################
-        cat_sift=m.load_categories_from_file('.//images//sift')
-        cat_surf=m.load_categories_from_file('.//images//surf')
+        cat_sift=m.load_categories_from_file('.//images//1000//sift3')
+        cat_surf=m.load_categories_from_file('.//images//1000//surf3')
         #cat_sift[0]=m.load_category_from_file('airplane','.//images//sift')
     else:
         ##################Load pickle db###################
@@ -43,6 +46,14 @@ elif m.retrain==2:
             c.train_classifier(algorithm)
 #categories_s=[cat_sift,cat_surf]
 
+#########################Save###############################
+if saveCategories:
+    m.save_all_categories(cat_sift,'.//images//2000//sift')           
+    m.save_all_categories(cat_surf,'.//images//2000//surf')           
+    for algorithm,cats in zip([sift,surf],[cat_sift,cat_surf]):
+        for c in cats:
+            c.saveTrainData2(algorithm)
+
 
 times=[]
 algorithm=sift
@@ -50,7 +61,7 @@ categories=cat_sift
 
 m.graph=1
 
-m.localizer=0
+m.localizer=1
 
 m.window_size_factor=1
 m.window_overlapping_factor=0
@@ -60,15 +71,28 @@ m.epsilon=0.05
 m.min_pts_per_cluster=1
 m.reduced=0.2
 
+m.bow_encoding=3
+#algorithm=sift
+#categories=m.load_categories_from_file('.//images//sift3')
 
+for algorithm,cats in zip([sift,surf],[cat_sift,cat_surf]):
+    
+    m.test(cats,algorithm)
 
-for i in range(4):
-    m.bow_encoding=i
-    algorithm=m.Algorithm('SIFT',k=k,n=n)
-    for category in categories:
-        category.X_train=[]
-        category.train_classifier(algorithm)
-    m.test(categories,algorithm)
+#for i in range(4):
+#    m.bow_encoding=i
+#    algorithm=m.Algorithm('SURF',k=k,n=n)
+#    for category in cat_surf:
+#        category.SVMTrainData=[]
+#        category.train_classifier(algorithm)
+#        os.makedirs('.//images//SURF'+str(m.bow_encoding), exist_ok=True)
+#        m.save_all_categories(cat_surf,'.//images//SURF'+str(m.bow_encoding)) 
+    
+#for i in range(3,-1,-1):
+#    m.bow_encoding=i
+#    algorithm=m.Algorithm('SURF',k=k,n=n)    
+#    categories=m.load_categories_from_file('.//images//SURF'+str(i))
+#    m.test(categories,algorithm)
 
 
 
@@ -80,15 +104,9 @@ for i in range(4):
 
 # In[9]:
 
-#########################Save###############################
-if saveCategories:
-    m.save_all_categories(cat_sift,'.//images//sift')           
-    #m.save_all_categories(cat_surf,'.//images//surf')           
-    #for algorithm,cats in zip([sift,surf],[cat_sift,cat_surf]):
-    #    for c in cats:
-    #        c.saveTrainData2(algorithm)
-    for c in cat_sift:
-        c.saveTrainData2(algorithm)
+
+    #for c in cat_sift:
+    #    c.saveTrainData2(algorithm)
 
 
 

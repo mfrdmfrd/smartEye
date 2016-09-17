@@ -1644,7 +1644,9 @@ def test(categories,algorithm):
                     rows,cols=img.shape
                 else:
                     rows,cols,ch=img.shape
-                                
+                
+                log("Using Window(" + str(band) + "," + str(o) + ") Scan to Localize Targets...")
+                
                 log("Using Window(" + str(band) + "," + str(o) + ") Scan to Localize Targets...",log_file)
 
                 cluster_centers=np.array([np.array([i,j]) for j in range(int(band/2),rows,int(step))
@@ -1690,9 +1692,6 @@ def test(categories,algorithm):
 
             plot_features_and_cluster_centers(img,TT,None,[],[], graph,
                                         os.path.join(Testingdir_out,'TT_'+ filename + '.png'),'Ground Truth')
-
-            plot_features_and_cluster_centers(img,cluster_centers,None,[],[], graph,
-                                        os.path.join(Testingdir_out,'CC_'+ filename + '.png'),'Testing points')
 
             #algorithm.bowextractor.setVocabulary(category.vocab)
 

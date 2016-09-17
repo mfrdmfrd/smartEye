@@ -11,7 +11,7 @@ m.initialize_parameteres()
 
 csv_file='E:\Master\Paper\img\g2_1.txt'
 
-algorithms=['DBM','LLC','BOW','pHOG','Mfrd']
+algorithms=['DBM','LLC','BOW','pHOG','Thesis']
 
 with open(csv_file, 'r') as csvfile:
     i=0
